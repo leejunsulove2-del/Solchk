@@ -1,0 +1,110 @@
+{
+  "entities": {
+    "Grid": {
+      "title": "Grid",
+      "description": "250m x 250m power line capacity grid cell",
+      "type": "object",
+      "properties": {
+        "gridId": {
+          "type": "string",
+          "description": "Unique identifier for the grid cell"
+        },
+        "south": {
+          "type": "number",
+          "description": "Southern boundary latitude"
+        },
+        "west": {
+          "type": "number",
+          "description": "Western boundary longitude"
+        },
+        "north": {
+          "type": "number",
+          "description": "Northern boundary latitude"
+        },
+        "east": {
+          "type": "number",
+          "description": "Eastern boundary longitude"
+        },
+        "lineName": {
+          "type": "string",
+          "description": "Power distribution line name (선로명)"
+        },
+        "capacity": {
+          "type": "number",
+          "description": "Available distributed generation capacity in kW (여유용량)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last updated timestamp"
+        }
+      },
+      "required": ["gridId", "south", "west", "north", "east", "lineName", "capacity"]
+    },
+    "SearchLog": {
+      "title": "SearchLog",
+      "description": "Record of user searches and capacity lookups",
+      "type": "object",
+      "properties": {
+        "lat": {
+          "type": "number",
+          "description": "Queried latitude"
+        },
+        "lng": {
+          "type": "number",
+          "description": "Queried longitude"
+        },
+        "searchedAt": {
+          "type": "string",
+          "description": "Search timestamp"
+        },
+        "lineName": {
+          "type": "string",
+          "description": "Line name resolved at this point"
+        },
+        "capacity": {
+          "type": "number",
+          "description": "Available capacity in kW at lookup time"
+        },
+        "gridId": {
+          "type": "string",
+          "description": "Matching grid ID"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device or client identifier for rate limiting"
+        }
+      },
+      "required": ["lat", "lng", "searchedAt", "lineName", "capacity"]
+    },
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "Application configuration including external API keys",
+      "type": "object",
+      "properties": {
+        "apiKey": {
+          "type": "string",
+          "description": "VWorld API key"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Configuration timestamp"
+        }
+      },
+      "required": ["apiKey"]
+    }
+  },
+  "firestore": {
+    "/grids/{gridId}": {
+      "schema": "Grid",
+      "description": "Grid cells with line capacity data"
+    },
+    "/search_logs/{logId}": {
+      "schema": "SearchLog",
+      "description": "Public history of user search inquiries"
+    },
+    "/settings/{configId}": {
+      "schema": "SystemConfig",
+      "description": "System settings and API keys"
+    }
+  }
+}

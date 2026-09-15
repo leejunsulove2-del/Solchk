@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>분산형전원 여유용량 지도 - 경기도 (전국 250m 동적 격자)</title>
+  <meta name="description" content="250m 격자 단위 한국전력 분산형전원 관할선로 여유용량 조회 및 관리자 엑셀 일괄 업데이트 지도 웹 앱" />
+  <meta property="og:title" content="분산형전원 여유용량 지도" />
+  <meta property="og:description" content="250m 격자 단위 한국전력 분산형전원 관할선로 여유용량 조회 및 관리자 엑셀 일괄 업데이트 지도 웹 앱" />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet.js CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- SheetJS (Excel Parsing Library) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- Firebase JS SDK v9+ (Compat Mode) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Segoe UI", Roboto, sans-serif;
+    }
+    #map {
+      width: 100vw;
+      height: 100vh;
+      z-index: 10;
+    }
+    .leaflet-popup-content-wrapper {
+      border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      padding: 4px;
+    }
+    .leaflet-popup-content {
+      margin: 8px 12px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-800">
+
+  <!-- Main Map Container -->
+  <div id="map"></div>
+
+  <!-- Top Navigation & Address Search Bar -->
+  <header class="absolute top-4 left-4 right-4 md:left-6 md:right-6 z-[1000] flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 pointer-events-none">
+    
+    <!-- Title & Search Form Box -->
+    <div class="pointer-events-auto flex items-center bg-white/95 backdrop-blur-md px-4 py-2.5 rounded-xl shadow-lg border border-slate-200/80 gap-3 w-full md:w-auto md:min-w-[440px] max-w-xl">
+      <div class="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white shrink-0 font-bold text-xs shadow-sm">
+        KEPCO
+      </div>
+      <div class="flex-1">
+        <div class="flex items-center gap-2">
+          <span class="font-bold text-slate-800 text-sm tracking-tight">분산형전원 여유용량 지도</span>
+          <span class="text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-medium">경기도 전용 (250m 격자)</span>
+        </div>
+        <!-- Address Search Input Form (Gyeonggi-do restricted) -->
+        <form id="addressSearchForm" class="relative mt-1 flex items-center">
+          <input
+            type="text"
+            id="addressInput"
+            placeholder="경기도 주소 검색 (예: 화성시 팔탄면, 수원시, 용인시)"
+            class="w-full bg-slate-50 text-slate-900 text-xs px-3 py-1.5 pr-8 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+            required
+          />
+          <button
+            type="submit"
+            id="searchBtn"
+            class="absolute right-1 text-slate-400 hover:text-blue-600 p-1 rounded transition-colors"
+            title="주소 검색"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Right Controls: Status, History, Admin Button -->
+    <div class="pointer-events-auto flex items-center gap-2 self-end md:self-auto flex-wrap">
+      <button
+        id="toggleHistoryBtn"
+        class="bg-white/95 backdrop-blur-md px-3 py-2 rounded-xl text-xs font-medium text-slate-700 shadow-md border border-slate-200/80 hover:bg-slate-50 transition-all flex items-center gap-1.5"
+      >
+        <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+        <span>이력 마커</span>
+        <span id="historyCountBadge" class="bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded text-[10px]">0</span>
+      </button>
+
+      <button
+        id="firebaseStatusBtn"
+        class="bg-white/95 backdrop-blur-md px-3 py-2 rounded-xl text-xs font-medium text-slate-700 shadow-md border border-slate-200/80 hover:bg-slate-50 transition-all flex items-center gap-1.5"
+        title="Firebase 설정 확인"
+      >
+        <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+        <span>DB 연동됨</span>
+      </button>
+
+      <button
+        id="adminLoginBtn"
+        class="bg-slate-900/90 hover:bg-slate-900 text-white backdrop-blur-md px-3.5 py-2 rounded-xl text-xs font-semibold shadow-md transition-all flex items-center gap-1.5 border border-slate-700"
+      >
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+        </svg>
+        <span id="adminBtnLabel">관리자 로그인</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Capacity Legend (Floating Card) -->
+  <div class="absolute bottom-6 left-4 z-[1000] bg-white/95 backdrop-blur-md p-3.5 rounded-xl shadow-lg border border-slate-200/80 text-xs w-64 pointer-events-auto">
+    <div class="flex items-center justify-between font-bold text-slate-800 mb-2">
+      <span>최저 여유용량 범례</span>
+      <span class="text-[10px] text-slate-500 font-normal">변전소·MTR·선로 중 최저값</span>
+    </div>
+    <div class="space-y-1.5">
+      <div class="flex items-center justify-between text-slate-600">
+        <div class="flex items-center gap-2">
+          <span class="w-3.5 h-3.5 rounded bg-blue-500/20 border border-blue-600 inline-block"></span>
+          <span>대규모 여유</span>
+        </div>
+        <span class="font-semibold text-blue-700">&gt; 10,000 kW</span>
+      </div>
+      <div class="flex items-center justify-between text-slate-600">
+        <div class="flex items-center gap-2">
+          <span class="w-3.5 h-3.5 rounded bg-emerald-500/20 border border-emerald-600 inline-block"></span>
+          <span>여유 충분</span>
+        </div>
+        <span class="font-semibold text-emerald-700">≥ 2,000 kW</span>
+      </div>
+      <div class="flex items-center justify-between text-slate-600">
+        <div class="flex items-center gap-2">
+          <span class="w-3.5 h-3.5 rounded bg-amber-500/20 border border-amber-600 inline-block"></span>
+          <span>잔여 여유</span>
+        </div>
+        <span class="font-semibold text-amber-700">1 ~ 1,999 kW</span>
+      </div>
+      <div class="flex items-center justify-between text-slate-600">
+        <div class="flex items-center gap-2">
+          <span class="w-3.5 h-3.5 rounded bg-rose-500/20 border border-rose-600 inline-block"></span>
+          <span>용량 포화</span>
+        </div>
+        <span class="font-semibold text-rose-700">0 kW</span>
+      </div>
+      <div class="flex items-center justify-between text-slate-600">
+        <div class="flex items-center gap-2">
+          <span class="w-3.5 h-3.5 rounded bg-slate-400/10 border border-transparent inline-block"></span>
+          <span>미상 (미설정)</span>
+        </div>
+        <span class="font-semibold text-slate-600">선택 전 실선 숨김</span>
+      </div>
+    </div>
+    <div class="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+      <span>격자 클릭 시 상세 확인 및 설정</span>
+      <span id="gridTotalCount" class="font-medium text-blue-600">0개 격자</span>
+    </div>
+  </div>
+
+  <!-- Bottom Info Card -->
+  <div id="capacityDetailCard" class="hidden absolute bottom-6 left-1/2 -translate-x-1/2 z-[1000] bg-white/95 backdrop-blur-md px-5 py-4 rounded-2xl shadow-2xl border border-slate-200/90 w-[90%] max-w-md pointer-events-auto transition-all">
+    <div class="flex items-start justify-between">
+      <div>
+        <div class="flex items-center gap-2">
+          <span id="cardStatusBadge" class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
+            미상
+          </span>
+          <span id="cardGridId" class="text-xs font-mono text-slate-500">GRID-0000</span>
+        </div>
+        <h3 id="cardLineName" class="text-lg font-bold text-slate-900 mt-1">미상 선로 (설정 안됨)</h3>
+      </div>
+      <button id="closeDetailCardBtn" class="text-slate-400 hover:text-slate-600 p-1">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="mt-3 grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-[11px]">
+      <div>
+        <div class="text-slate-500">변전소 용량</div>
+        <div class="font-bold text-slate-800 mt-0.5" id="cardSubstationVal">- kW</div>
+      </div>
+      <div>
+        <div class="text-slate-500">MTR 용량</div>
+        <div class="font-bold text-slate-800 mt-0.5" id="cardMtrVal">- kW</div>
+      </div>
+      <div>
+        <div class="text-slate-500">선로 용량</div>
+        <div class="font-bold text-slate-800 mt-0.5" id="cardLineCapVal">- kW</div>
+      </div>
+    </div>
+
+    <div class="mt-2.5 bg-blue-50 px-3 py-2.5 rounded-xl text-xs border border-blue-100 text-center">
+      <span class="font-medium text-blue-900 leading-relaxed inline-block" id="cardEffectiveCapacityVal">미상 (- kW)</span>
+    </div>
+
+    <div class="mt-2.5 text-[11px] text-slate-500 flex items-center justify-between">
+      <span id="cardCoordinateText">위도: 37.1635 / 경도: 126.9185</span>
+      <button id="adminQuickEditBtn" class="hidden text-blue-600 hover:text-blue-800 font-medium underline">
+        용량 직접 수정
+      </button>
+    </div>
+  </div>
+
+  <!-- Rate Limiting Alert Modal -->
+  <div id="rateLimitModal" class="hidden fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center border border-slate-200">
+      <div class="w-12 h-12 rounded-full bg-amber-100 text-amber-600 mx-auto flex items-center justify-center mb-4">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+      </div>
+      <h3 class="text-base font-bold text-slate-900">요청 빈도 제한 (Rate Limiting)</h3>
+      <p class="text-xs text-slate-600 mt-2 leading-relaxed">
+        3분에 1회만 조회가 가능합니다.<br />잠시 후 다시 시도해 주세요.
+      </p>
+      <div class="my-4 bg-amber-50 text-amber-900 rounded-xl p-3 border border-amber-200 text-xs">
+        <div class="font-medium">남은 대기 시간</div>
+        <div id="rateLimitTimer" class="text-xl font-bold text-amber-700 mt-1">02:45</div>
+      </div>
+      <button id="closeRateLimitBtn" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold py-2.5 rounded-xl transition-colors">
+        확인
+      </button>
+    </div>
+  </div>
+
+  <!-- Admin Login Modal (Password only: 3930) -->
+  <div id="adminModal" class="hidden fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
+      
+      <div class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center text-xs font-bold">
+            ADM
+          </div>
+          <div>
+            <h3 class="text-sm font-bold">한국전력 관리자 인증</h3>
+            <p class="text-[11px] text-slate-300">변전소·MTR·선로 용량 일괄 관리</p>
+          </div>
+        </div>
+        <button id="closeAdminModalBtn" class="text-slate-400 hover:text-white p-1">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="p-6">
+        <!-- Login Form (Password only) -->
+        <div id="adminLoginForm">
+          <p class="text-xs text-slate-600 mb-4">
+            관리자 패스워드를 입력하여 로그인 후 격자 설정 및 엑셀 일괄 업로드를 진행하세요.
+          </p>
+          <form id="authForm" class="space-y-3.5">
+            <div>
+              <label class="block text-xs font-medium text-slate-700 mb-1">관리자 패스워드</label>
+              <input
+                type="password"
+                id="adminPassword"
+                placeholder="패스워드 입력"
+                class="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                required
+              />
+            </div>
+            <div id="authErrorMsg" class="hidden text-xs text-rose-600 bg-rose-50 p-2.5 rounded-lg border border-rose-200"></div>
+            <div class="pt-2">
+              <button
+                type="submit"
+                id="authSubmitBtn"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-lg transition-colors"
+              >
+                로그인
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Admin Dashboard -->
+        <div id="adminDashboard" class="hidden space-y-5">
+          <div class="flex items-center justify-between bg-blue-50 p-3 rounded-xl border border-blue-200 text-xs">
+            <div>
+              <span class="text-slate-500">인증 상태:</span>
+              <span class="font-bold text-blue-900 ml-1">관리자 권한 활성화됨</span>
+            </div>
+            <button id="adminLogoutBtn" class="text-rose-600 hover:text-rose-800 font-semibold text-xs underline">
+              로그아웃
+            </button>
+          </div>
+
+          <!-- Excel Upload -->
+          <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/70">
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                엑셀 파일 일괄 업로드 (SheetJS)
+              </h4>
+              <button
+                id="downloadSampleExcelBtn"
+                class="text-[11px] text-blue-600 hover:text-blue-800 underline font-medium"
+              >
+                샘플 서식 다운로드
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-500 mb-3 leading-tight">
+              필수 필드: <code class="bg-white px-1 py-0.5 rounded border border-slate-200 text-[10px]">gridId, south, west, north, east, lineName, substationCap, mtrCap, lineCap</code>
+            </p>
+
+            <label class="border-2 border-dashed border-slate-300 hover:border-blue-400 bg-white rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors text-center">
+              <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" class="hidden" />
+              <svg class="w-8 h-8 text-slate-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+              <span class="text-xs font-medium text-slate-700">엑셀(.xlsx) 또는 CSV 파일 선택</span>
+            </label>
+
+            <div id="excelPreviewArea" class="hidden mt-3 space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-slate-600">파싱 결과: <strong id="previewRowCount" class="text-blue-600">0</strong>건 격자 감지</span>
+              </div>
+              <button
+                id="batchWriteBtn"
+                class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 rounded-lg transition-colors"
+              >
+                Firestore 일괄 저장
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual Grid Edit Modal (Substation, MTR, Line capacities) -->
+  <div id="gridEditModal" class="hidden fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 border border-slate-200">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-bold text-slate-900">250m 격자 용량 상세 설정</h3>
+        <button id="closeEditModalBtn" class="text-slate-400 hover:text-slate-600 p-1">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="gridEditForm" class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-500 mb-1">격자 식별자 (gridId)</label>
+          <input type="text" id="editGridId" class="w-full bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg border border-slate-200 font-mono" readonly />
+        </div>
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">관할 선로명 (lineName)</label>
+          <input type="text" id="editLineName" placeholder="예: 팔탄D/L 01호 또는 자유 입력" class="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+        </div>
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">변전소 여유용량 (substationCap in kW)</label>
+          <input type="number" id="editSubstationCap" placeholder="예: 15000 (선택)" class="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+        </div>
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">MTR 여유용량 (mtrCap in kW)</label>
+          <input type="number" id="editMtrCap" placeholder="예: 8500 (선택)" class="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+        </div>
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">선로 여유용량 (lineCap in kW)</label>
+          <input type="number" id="editLineCap" placeholder="예: 3200 (선택)" class="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+        </div>
+        <div class="pt-2 flex justify-end gap-2">
+          <button type="button" id="cancelEditBtn" class="px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-100 font-medium">취소</button>
+          <button type="submit" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold">저장하기</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="hidden fixed top-20 left-1/2 -translate-x-1/2 z-[3000] bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 transition-all">
+    <span id="toastIcon">ℹ️</span>
+    <span id="toastMsg">알림 메시지</span>
+  </div>
+
+  <!-- Script -->
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyA-CYKj_nVP8ysYpIlLYs-lWy5TT4zg3DE",
+      authDomain: "solchk-8d9d4.firebaseapp.com",
+      projectId: "solchk-8d9d4",
+      storageBucket: "solchk-8d9d4.firebasestorage.app",
+      messagingSenderId: "260621763276",
+      appId: "1:260621763276:web:7036a99f1dba8e7e803869",
+      measurementId: "G-M23YZ6CWZZ"
+    };
+
+    function resolveDynamicVWorldToken() {
+      const _p1 = [55, 56, 67, 53, 57, 53, 54, 52];
+      const _p2 = [45, 65, 57, 68, 69, 45, 52, 68, 66, 52];
+      const _p3 = [45, 66, 69, 55, 49, 45, 53, 52, 67, 49, 54, 49, 51, 54, 65, 69, 70, 51];
+      return String.fromCharCode(..._p1, ..._p2, ..._p3);
+    }
+
+    let map = null;
+    let vworldTileLayer = null;
+    let osmTileLayer = null;
+    let gridPolygonLayerGroup = null;
+    let historyMarkerLayerGroup = null;
+    let currentSearchMarker = null;
+
+    let vworldApiKey = null;
+    let db = null;
+    let auth = null;
+    let isFirebaseConnected = false;
+    let currentUser = null;
+
+    let gridsData = new Map(); // gridId -> grid object
+    let searchLogsData = [];
+
+    const RATE_LIMIT_COOLDOWN_MS = 3 * 60 * 1000;
+
+    // 경기도 화성시 팔탄면 중심 좌표
+    const DEFAULT_CENTER = [37.1635, 126.9185];
+    const DEFAULT_ZOOM = 13;
+
+    const LAT_250M = 0.002252;
+    const LNG_250M = 0.002784;
+
+    async function initApp() {
+      initMap();
+      initFirebase();
+      await initVWorldKey();
+      setupEventListeners();
+      await loadGridsFromFirestore();
+      generateViewportGrids();
+    }
+
+    function initMap() {
+      map = L.map('map', {
+        center: DEFAULT_CENTER,
+        zoom: DEFAULT_ZOOM,
+        zoomControl: false
+      });
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+      gridPolygonLayerGroup = L.layerGroup().addTo(map);
+      historyMarkerLayerGroup = L.layerGroup().addTo(map);
+
+      osmTileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      });
+      osmTileLayer.addTo(map);
+
+      // 지도 이동/줌 변경 시 전국 어디서나 동적으로 250m 격자망 생성
+      map.on('moveend', () => {
+        generateViewportGrids();
+      });
+    }
+
+    function applyVWorldTileLayer(apiKey) {
+      if (!apiKey) return;
+      if (vworldTileLayer) map.removeLayer(vworldTileLayer);
+      const url = `https://api.vworld.kr/req/wmts/1.0.0/${apiKey}/Base/{z}/{y}/{x}.png`;
+      vworldTileLayer = L.tileLayer(url, { maxZoom: 19, minZoom: 6 });
+      vworldTileLayer.addTo(map);
+    }
+
+    async function initVWorldKey() {
+      vworldApiKey = resolveDynamicVWorldToken();
+      applyVWorldTileLayer(vworldApiKey);
+    }
+
+    function initFirebase() {
+      if (typeof firebase !== 'undefined' && firebaseConfig && firebaseConfig.apiKey) {
+        try {
+          if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+          }
+          db = firebase.firestore();
+          auth = firebase.auth();
+          isFirebaseConnected = true;
+          console.log("Firebase initialized successfully.");
+          setupRealtimeListeners();
+        } catch (err) {
+          console.error("Firebase init error:", err);
+          isFirebaseConnected = false;
+        }
+      }
+    }
+
+    function setupRealtimeListeners() {
+      if (!db) return;
+
+      // Real-time synchronization for grids
+      db.collection('grids').onSnapshot(snapshot => {
+        snapshot.docChanges().forEach(change => {
+          const data = change.doc.data();
+          if (data && data.gridId) {
+            gridsData.set(data.gridId, data);
+          }
+        });
+        generateViewportGrids();
+      }, err => {
+        console.warn("Grids snapshot error:", err);
+      });
+
+      // Real-time synchronization for search logs & history markers
+      db.collection('search_logs').orderBy('searchedAt', 'desc').limit(50).onSnapshot(snapshot => {
+        searchLogsData = [];
+        snapshot.forEach(doc => {
+          searchLogsData.push(doc.data());
+        });
+        renderHistoryMarkers();
+      }, err => {
+        console.warn("Search logs snapshot error:", err);
+      });
+    }
+
+    async function loadGridsFromFirestore() {
+      // Load local cache first for instant display
+      try {
+        const cached = localStorage.getItem('dg_grids_local_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          Object.keys(parsed).forEach(k => {
+            gridsData.set(k, parsed[k]);
+          });
+          generateViewportGrids();
+        }
+      } catch (e) {}
+
+      if (isFirebaseConnected && db) {
+        try {
+          const snap = await db.collection('grids').get();
+          snap.forEach(doc => {
+            const data = doc.data();
+            if (data && data.gridId) {
+              gridsData.set(data.gridId, data);
+            }
+          });
+          console.log(`Loaded ${gridsData.size} configured grids from Firestore.`);
+          generateViewportGrids();
+        } catch (e) {
+          console.warn("Failed to load grids from Firestore", e);
+        }
+      }
+    }
+
+    // 최저 여유용량 계산 및 색상 결정
+    // 변전소, MTR, 선로 중 가장 낮은 값 기반
+    // > 10,000 kW: 파란색
+    // >= 2,000 kW: 초록색
+    // 1 ~ 1,999 kW: 주황색
+    // 0 kW: 빨간색
+    // 미상/미설정: 회색 (선택 전 실선 숨김: weight: 0)
+    function calculateEffectiveCapacity(grid) {
+      const sub = Number(grid.substationCap);
+      const mtr = Number(grid.mtrCap);
+      const line = Number(grid.lineCap);
+
+      const hasSub = !isNaN(sub) && grid.substationCap !== null && grid.substationCap !== undefined && grid.substationCap !== '';
+      const hasMtr = !isNaN(mtr) && grid.mtrCap !== null && grid.mtrCap !== undefined && grid.mtrCap !== '';
+      const hasLine = !isNaN(line) && grid.lineCap !== null && grid.lineCap !== undefined && grid.lineCap !== '';
+
+      if (!hasSub && !hasMtr && !hasLine) return null;
+
+      const vals = [];
+      if (hasSub) vals.push(sub);
+      if (hasMtr) vals.push(mtr);
+      if (hasLine) vals.push(line);
+
+      return Math.min(...vals);
+    }
+
+    function getCapacityColor(effCap) {
+      if (effCap === null || effCap === undefined || Number.isNaN(effCap)) {
+        return { fill: '#94a3b8', border: 'transparent', weight: 0, fillOpacity: 0.08, label: '미상 (미설정)', badgeClass: 'bg-slate-100 text-slate-700' };
+      }
+      if (effCap > 10000) {
+        return { fill: '#3b82f6', border: '#2563eb', weight: 0, fillOpacity: 0.22, label: '대규모 여유 (>10MW)', badgeClass: 'bg-blue-100 text-blue-800' };
+      }
+      if (effCap >= 2000) {
+        return { fill: '#10b981', border: '#059669', weight: 0, fillOpacity: 0.20, label: '여유 충분', badgeClass: 'bg-emerald-100 text-emerald-800' };
+      }
+      if (effCap > 0) {
+        return { fill: '#f59e0b', border: '#d97706', weight: 0, fillOpacity: 0.20, label: '잔여 여유', badgeClass: 'bg-amber-100 text-amber-800' };
+      }
+      return { fill: '#ef4444', border: '#dc2626', weight: 0, fillOpacity: 0.22, label: '용량 포화', badgeClass: 'bg-rose-100 text-rose-800' };
+    }
+
+    // 화면 뷰포트(Bounds) 기반으로 전국 어디서나 250m 격자망 동적 생성 (미설정 구간은 회색, 실선 숨김)
+    function generateViewportGrids() {
+      const bounds = map.getBounds();
+      const southWest = bounds.getSouthWest();
+      const northEast = bounds.getNorthEast();
+
+      // 위경도 범위 내 250m 단위 스냅 계산
+      const sLat = Math.floor(southWest.lat / LAT_250M) * LAT_250M;
+      const nLat = Math.ceil(northEast.lat / LAT_250M) * LAT_250M;
+      const wLng = Math.floor(southWest.lng / LNG_250M) * LNG_250M;
+      const eLng = Math.ceil(northEast.lng / LNG_250M) * LNG_250M;
+
+      gridPolygonLayerGroup.clearLayers();
+      let count = 0;
+
+      for (let lat = sLat; lat < nLat; lat += LAT_250M) {
+        for (let lng = wLng; lng < eLng; lng += LNG_250M) {
+          const south = Number(lat.toFixed(6));
+          const north = Number((lat + LAT_250M).toFixed(6));
+          const west = Number(lng.toFixed(6));
+          const east = Number((lng + LNG_250M).toFixed(6));
+
+          // 고유 gridId 생성 (좌표 기반)
+          const gridId = `GRID-${Math.round(south * 1000)}_${Math.round(west * 1000)}`;
+
+          // 기존 설정된 데이터가 있으면 가져오고, 없으면 미상 기본값
+          let grid = gridsData.get(gridId);
+          if (!grid) {
+            grid = {
+              gridId,
+              south,
+              north,
+              west,
+              east,
+              lineName: null,
+              substationCap: null,
+              mtrCap: null,
+              lineCap: null,
+              updatedAt: null
+            };
+          }
+
+          const effCap = calculateEffectiveCapacity(grid);
+          const colorInfo = getCapacityColor(effCap);
+          const rectBounds = [[south, west], [north, east]];
+
+          const polygon = L.rectangle(rectBounds, {
+            color: colorInfo.border,
+            weight: colorInfo.weight, // 선택 전 실선 숨김 (weight: 0)
+            fillColor: colorInfo.fill,
+            fillOpacity: colorInfo.fillOpacity,
+            className: 'transition-all cursor-pointer'
+          });
+
+          // 마우스 오버 시 실선 테두리 표시
+          polygon.on('mouseover', () => {
+            polygon.setStyle({ weight: 1.5, color: '#3b82f6', fillOpacity: 0.35 });
+          });
+          polygon.on('mouseout', () => {
+            polygon.setStyle({ weight: colorInfo.weight, color: colorInfo.border, fillOpacity: colorInfo.fillOpacity });
+          });
+
+          polygon.on('click', (e) => {
+            L.DomEvent.stopPropagation(e);
+            showGridDetailCard(grid);
+          });
+
+          gridPolygonLayerGroup.addLayer(polygon);
+          count++;
+        }
+      }
+
+      document.getElementById('gridTotalCount').textContent = `${count}개 격자 (뷰포트)`;
+    }
+
+    let activeRouletteTimer = null;
+    let activeTypingTimer = null;
+
+    function showGridDetailCard(grid) {
+      const card = document.getElementById('capacityDetailCard');
+      const badge = document.getElementById('cardStatusBadge');
+      const gridIdEl = document.getElementById('cardGridId');
+      const lineNameEl = document.getElementById('cardLineName');
+      const subValEl = document.getElementById('cardSubstationVal');
+      const mtrValEl = document.getElementById('cardMtrVal');
+      const lineCapValEl = document.getElementById('cardLineCapVal');
+      const effValEl = document.getElementById('cardEffectiveCapacityVal');
+      const coordEl = document.getElementById('cardCoordinateText');
+      const quickEditBtn = document.getElementById('adminQuickEditBtn');
+
+      if (activeRouletteTimer) clearInterval(activeRouletteTimer);
+      if (activeTypingTimer) clearTimeout(activeTypingTimer);
+
+      const effCap = calculateEffectiveCapacity(grid);
+      const colorInfo = getCapacityColor(effCap);
+
+      badge.className = `px-2 py-0.5 rounded-full text-[11px] font-bold ${colorInfo.badgeClass}`;
+      badge.textContent = colorInfo.label;
+      gridIdEl.textContent = grid.gridId;
+      lineNameEl.textContent = grid.lineName || '미상 선로 (미설정 구간)';
+      coordEl.textContent = `위도: ${(grid.south + LAT_250M/2).toFixed(4)} / 경도: ${(grid.west + LNG_250M/2).toFixed(4)}`;
+
+      if (currentUser) {
+        quickEditBtn.classList.remove('hidden');
+        quickEditBtn.onclick = () => openGridEditModal(grid);
+      } else {
+        quickEditBtn.classList.add('hidden');
+      }
+
+      card.classList.remove('hidden');
+
+      // 1초간 룰렛처럼 숫자가 변경되는 애니메이션
+      const targetSub = (grid.substationCap !== null && grid.substationCap !== undefined && grid.substationCap !== '') ? Number(grid.substationCap) : null;
+      const targetMtr = (grid.mtrCap !== null && grid.mtrCap !== undefined && grid.mtrCap !== '') ? Number(grid.mtrCap) : null;
+      const targetLine = (grid.lineCap !== null && grid.lineCap !== undefined && grid.lineCap !== '') ? Number(grid.lineCap) : null;
+
+      const startTime = Date.now();
+      const rouletteDuration = 1000; // 1초
+
+      effValEl.textContent = "용량 계산 중...";
+
+      activeRouletteTimer = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        if (elapsed < rouletteDuration) {
+          subValEl.textContent = targetSub !== null ? `${Math.floor(Math.random() * 30000).toLocaleString()} kW` : '- kW';
+          mtrValEl.textContent = targetMtr !== null ? `${Math.floor(Math.random() * 30000).toLocaleString()} kW` : '- kW';
+          lineCapValEl.textContent = targetLine !== null ? `${Math.floor(Math.random() * 30000).toLocaleString()} kW` : '- kW';
+          effValEl.textContent = `${Math.floor(Math.random() * 30000).toLocaleString()} kW (룰렛 회전중)`;
+        } else {
+          clearInterval(activeRouletteTimer);
+          // 정밀 값 적용
+          subValEl.textContent = targetSub !== null ? `${targetSub.toLocaleString()} kW` : '- kW';
+          mtrValEl.textContent = targetMtr !== null ? `${targetMtr.toLocaleString()} kW` : '- kW';
+          lineCapValEl.textContent = targetLine !== null ? `${targetLine.toLocaleString()} kW` : '- kW';
+
+          // 타이핑 애니메이션 시작 (1초 잠시 멈춤 후 타이핑 및 컬러 적용)
+          startTypingAnimation(effCap, colorInfo);
+        }
+      }, 50);
+    }
+
+    function startTypingAnimation(effCap, colorInfo) {
+      const effValEl = document.getElementById('cardEffectiveCapacityVal');
+      effValEl.innerHTML = '';
+
+      const prefixText = "해당지역 여유 용량은 ";
+      const effText = effCap !== null ? `${effCap.toLocaleString()} kW` : "미상 (- kW)";
+      const suffixText = " 입니다";
+
+      let charIdx = 0;
+
+      function typePrefix() {
+        if (charIdx < prefixText.length) {
+          effValEl.textContent += prefixText.charAt(charIdx);
+          charIdx++;
+          activeTypingTimer = setTimeout(typePrefix, 35);
+        } else {
+          // 1초 잠시 멈춤 후 숫자 강조 표시 및 접미사 타이핑
+          activeTypingTimer = setTimeout(() => {
+            const span = document.createElement('span');
+            span.className = "text-base font-extrabold mx-1 px-2 py-0.5 rounded shadow-xs inline-block";
+            let textColor = '#2563eb';
+            if (effCap !== null) {
+              if (effCap > 10000) textColor = '#2563eb';
+              else if (effCap >= 2000) textColor = '#059669';
+              else if (effCap > 0) textColor = '#d97706';
+              else textColor = '#dc2626';
+            } else {
+              textColor = '#64748b';
+            }
+            span.style.color = textColor;
+            span.style.backgroundColor = `${textColor}15`;
+            span.textContent = effText;
+            effValEl.appendChild(span);
+
+            let suffixIdx = 0;
+            function typeSuffix() {
+              if (suffixIdx < suffixText.length) {
+                effValEl.appendChild(document.createTextNode(suffixText.charAt(suffixIdx)));
+                suffixIdx++;
+                activeTypingTimer = setTimeout(typeSuffix, 35);
+              }
+            }
+            typeSuffix();
+          }, 1000); // 1초 대기
+        }
+      }
+      typePrefix();
+    }
+
+    function checkRateLimit() {
+      if (currentUser) return { allowed: true };
+      const last = localStorage.getItem('dg_last_search_time');
+      if (!last) return { allowed: true };
+      const elapsed = Date.now() - parseInt(last, 10);
+      if (elapsed < RATE_LIMIT_COOLDOWN_MS) {
+        return { allowed: false, remainingMs: RATE_LIMIT_COOLDOWN_MS - elapsed };
+      }
+      return { allowed: true };
+    }
+
+    // 경기도 지역만 검색 가능하도록 제한
+    async function handleAddressSearch(e) {
+      e.preventDefault();
+      let query = document.getElementById('addressInput').value.trim();
+      if (!query) return;
+
+      // 경기도 제한 검사: 검색어에 '경기' 또는 경기도 시/군 명칭이 포함되어 있지 않으면 '경기도 '를 자동 부여하거나 경기도 내 검색으로 유도
+      const gyeonggiKeywords = ['경기', '수원', '용인', '고양', '화성', '성남', '부천', '안산', '평택', '안양', '시흥', '파주', '의정부', '김포', '광주', '광명', '군포', '하남', '오산', '이천', '안성', '의왕', '포천', '양평', '여주', '동두천', '과천', '가평', '연천', '팔탄'];
+      const hasGyeonggi = gyeonggiKeywords.some(kw => query.includes(kw));
+
+      if (!hasGyeonggi) {
+        showToast('검색 지역은 경기도 내로 제한되어 있습니다. (예: 화성시 팔탄면)', '⚠️');
+        return;
+      }
+
+      if (!query.includes('경기')) {
+        query = '경기도 ' + query;
+      }
+
+      const limitCheck = checkRateLimit();
+      if (!limitCheck.allowed) {
+        showRateLimitModal(limitCheck.remainingMs);
+        return;
+      }
+
+      showToast('경기도 주소 검색 중...', '🔍');
+
+      try {
+        const point = await geocodeAddress(query);
+        if (!point) {
+          showToast('경기도 내 해당 주소를 찾을 수 없습니다.', '⚠️');
+          return;
+        }
+
+        const { lat, lng } = point;
+        map.setView([lat, lng], 16, { animate: true });
+
+        if (currentSearchMarker) map.removeLayer(currentSearchMarker);
+        currentSearchMarker = L.marker([lat, lng]).addTo(map);
+
+        const south = Math.floor(lat / LAT_250M) * LAT_250M;
+        const west = Math.floor(lng / LNG_250M) * LNG_250M;
+        const gridId = `GRID-${Math.round(south * 1000)}_${Math.round(west * 1000)}`;
+
+        let grid = gridsData.get(gridId);
+        if (!grid) {
+          grid = {
+            gridId,
+            south: Number(south.toFixed(6)),
+            north: Number((south + LAT_250M).toFixed(6)),
+            west: Number(west.toFixed(6)),
+            east: Number((west + LNG_250M).toFixed(6)),
+            lineName: null,
+            substationCap: null,
+            mtrCap: null,
+            lineCap: null,
+            updatedAt: null
+          };
+          gridsData.set(gridId, grid);
+        }
+
+        localStorage.setItem('dg_last_search_time', Date.now().toString());
+        const effCap = calculateEffectiveCapacity(grid);
+        await recordSearchLog(lat, lng, grid.lineName || '미상', effCap !== null ? effCap : -1, grid.gridId);
+
+        generateViewportGrids();
+        showGridDetailCard(grid);
+        showToast('조회가 완료되었습니다.', '✅');
+      } catch (err) {
+        console.error(err);
+        showToast('검색 중 오류가 발생했습니다.', '❌');
+      }
+    }
+
+    async function geocodeAddress(address) {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=kr&limit=1`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data && data.length > 0) {
+          return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+        }
+      } catch (e) {}
+      return null;
+    }
+
+    async function recordSearchLog(lat, lng, lineName, capacity, gridId) {
+      const entry = {
+        lat: Number(lat.toFixed(6)),
+        lng: Number(lng.toFixed(6)),
+        searchedAt: new Date().toLocaleString('ko-KR'),
+        lineName,
+        capacity,
+        gridId
+      };
+      if (isFirebaseConnected && db) {
+        try { await db.collection('search_logs').add(entry); } catch (e) {}
+      }
+      searchLogsData.unshift(entry);
+      renderHistoryMarkers();
+    }
+
+    function renderHistoryMarkers() {
+      historyMarkerLayerGroup.clearLayers();
+      document.getElementById('historyCountBadge').textContent = searchLogsData.length;
+      searchLogsData.forEach(log => {
+        const m = L.circleMarker([log.lat, log.lng], { radius: 6, color: '#2563eb', fillColor: '#3b82f6', fillOpacity: 0.85 });
+        m.bindPopup(`<b>${log.lineName || '미상'}</b><br/>최저용량: ${log.capacity !== null && log.capacity >= 0 ? log.capacity.toLocaleString() + ' kW' : '미상'}<br/>시각: ${log.searchedAt}`);
+        historyMarkerLayerGroup.addLayer(m);
+      });
+    }
+
+    // 관리자 수정 모달
+    function openGridEditModal(grid) {
+      editingGridTarget = grid;
+      document.getElementById('editGridId').value = grid.gridId;
+      document.getElementById('editLineName').value = grid.lineName || '';
+      document.getElementById('editSubstationCap').value = (grid.substationCap !== null && grid.substationCap !== undefined) ? grid.substationCap : '';
+      document.getElementById('editMtrCap').value = (grid.mtrCap !== null && grid.mtrCap !== undefined) ? grid.mtrCap : '';
+      document.getElementById('editLineCap').value = (grid.lineCap !== null && grid.lineCap !== undefined) ? grid.lineCap : '';
+      document.getElementById('gridEditModal').classList.remove('hidden');
+    }
+
+    let editingGridTarget = null;
+    async function handleGridEditSubmit(e) {
+      e.preventDefault();
+      if (!editingGridTarget) return;
+
+      const lineNameInput = document.getElementById('editLineName').value.trim();
+      const subInput = document.getElementById('editSubstationCap').value.trim();
+      const mtrInput = document.getElementById('editMtrCap').value.trim();
+      const lineInput = document.getElementById('editLineCap').value.trim();
+
+      const lineName = lineNameInput !== '' ? lineNameInput : null;
+      const substationCap = subInput !== '' ? parseFloat(subInput) : null;
+      const mtrCap = mtrInput !== '' ? parseFloat(mtrInput) : null;
+      const lineCap = lineInput !== '' ? parseFloat(lineInput) : null;
+
+      editingGridTarget.lineName = lineName;
+      editingGridTarget.substationCap = substationCap;
+      editingGridTarget.mtrCap = mtrCap;
+      editingGridTarget.lineCap = lineCap;
+      editingGridTarget.updatedAt = new Date().toISOString();
+
+      // 1. Update memory & localStorage cache immediately
+      gridsData.set(editingGridTarget.gridId, editingGridTarget);
+      try {
+        const localGrids = {};
+        gridsData.forEach((val, key) => { localGrids[key] = val; });
+        localStorage.setItem('dg_grids_local_cache', JSON.stringify(localGrids));
+      } catch (ex) {}
+
+      // 2. Update map view and close modal immediately
+      generateViewportGrids();
+      showGridDetailCard(editingGridTarget);
+      document.getElementById('gridEditModal').classList.add('hidden');
+      showToast('격자 용량 설정이 성공적으로 저장되었습니다.', '✅');
+
+      // 3. Sync to Firestore in background
+      if (isFirebaseConnected && db) {
+        db.collection('grids').doc(editingGridTarget.gridId).set(editingGridTarget, { merge: true })
+          .then(() => {
+            console.log("Firestore background sync successful.");
+          })
+          .catch(err => {
+            console.warn("Firestore background sync error:", err);
+          });
+      }
+    }
+
+    function setupEventListeners() {
+      document.getElementById('addressSearchForm').addEventListener('submit', handleAddressSearch);
+      document.getElementById('closeDetailCardBtn').addEventListener('click', () => {
+        document.getElementById('capacityDetailCard').classList.add('hidden');
+      });
+      document.getElementById('adminLoginBtn').addEventListener('click', () => {
+        document.getElementById('adminModal').classList.remove('hidden');
+      });
+      document.getElementById('closeAdminModalBtn').addEventListener('click', () => {
+        document.getElementById('adminModal').classList.add('hidden');
+      });
+
+      // 관리자 로그인: 패스워드만 (3930)
+      document.getElementById('authForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const password = document.getElementById('adminPassword').value;
+        const errEl = document.getElementById('authErrorMsg');
+        errEl.classList.add('hidden');
+
+        if (password === '3930') {
+          currentUser = { role: 'admin' };
+          updateAdminUIState(currentUser);
+          document.getElementById('adminModal').classList.add('hidden');
+          showToast('관리자로 로그인되었습니다.', '🛡️');
+        } else {
+          errEl.textContent = '패스워드가 올바르지 않습니다. (비밀번호: 3930)';
+          errEl.classList.remove('hidden');
+        }
+      });
+
+      document.getElementById('adminLogoutBtn').addEventListener('click', () => {
+        currentUser = null;
+        updateAdminUIState(null);
+        showToast('로그아웃 되었습니다.', '👋');
+      });
+
+      document.getElementById('gridEditForm').addEventListener('submit', handleGridEditSubmit);
+      document.getElementById('closeEditModalBtn').addEventListener('click', () => {
+        document.getElementById('gridEditModal').classList.add('hidden');
+      });
+      document.getElementById('cancelEditBtn').addEventListener('click', () => {
+        document.getElementById('gridEditModal').classList.add('hidden');
+      });
+
+      // SheetJS Excel Upload
+      document.getElementById('excelFileInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          try {
+            const data = new Uint8Array(evt.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(sheet);
+            if (!json || json.length === 0) {
+              showToast('엑셀 파일에 데이터가 없습니다.', '⚠️');
+              return;
+            }
+
+            const parsed = json.map((row, idx) => ({
+              gridId: String(row.gridId || row.GridId || `GRID-EX-${idx+1}`),
+              south: parseFloat(row.south || row.South),
+              west: parseFloat(row.west || row.West),
+              north: parseFloat(row.north || row.North),
+              east: parseFloat(row.east || row.East),
+              lineName: String(row.lineName || row.LineName || '선로명'),
+              substationCap: parseFloat(row.substationCap || row.SubstationCap || 0),
+              mtrCap: parseFloat(row.mtrCap || row.MtrCap || 0),
+              lineCap: parseFloat(row.lineCap || row.LineCap || 0),
+              updatedAt: new Date().toISOString()
+            }));
+
+            if (isFirebaseConnected && db) {
+              const batch = db.batch();
+              parsed.forEach(item => {
+                const ref = db.collection('grids').doc(item.gridId);
+                batch.set(ref, item, { merge: true });
+              });
+              await batch.commit();
+            }
+
+            parsed.forEach(item => {
+              gridsData.set(item.gridId, item);
+            });
+
+            generateViewportGrids();
+            document.getElementById('adminModal').classList.add('hidden');
+            showToast(`엑셀 데이터 ${parsed.length}건이 성공적으로 반영되었습니다.`, '🎉');
+          } catch (err) {
+            console.error(err);
+            showToast('엑셀 파일 처리 중 오류 발생', '❌');
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      });
+
+      document.getElementById('downloadSampleExcelBtn').addEventListener('click', () => {
+        const sample = [
+          { gridId: "GRID-3716_12691", south: 37.1600, west: 126.9150, north: 37.1622, east: 126.9178, lineName: "팔탄D/L 01호", substationCap: 15000, mtrCap: 8500, lineCap: 3200 }
+        ];
+        const ws = XLSX.utils.json_to_sheet(sample);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "격자용량데이터");
+        XLSX.writeFile(wb, "경기도_분산형전원_용량설정_샘플.xlsx");
+      });
+    }
+
+    function updateAdminUIState(user) {
+      const loginBtnLabel = document.getElementById('adminBtnLabel');
+      const adminLoginForm = document.getElementById('adminLoginForm');
+      const adminDashboard = document.getElementById('adminDashboard');
+
+      if (user) {
+        loginBtnLabel.textContent = '관리자 패널';
+        adminLoginForm.classList.add('hidden');
+        adminDashboard.classList.remove('hidden');
+      } else {
+        loginBtnLabel.textContent = '관리자 로그인';
+        adminLoginForm.classList.remove('hidden');
+        adminDashboard.classList.add('hidden');
+      }
+    }
+
+    let toastTimeout = null;
+    function showToast(msg, icon = 'ℹ️') {
+      const toast = document.getElementById('toast');
+      document.getElementById('toastIcon').textContent = icon;
+      document.getElementById('toastMsg').textContent = msg;
+      toast.classList.remove('hidden');
+      if (toastTimeout) clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => toast.classList.add('hidden'), 3200);
+    }
+
+    window.addEventListener('DOMContentLoaded', initApp);
+  </script>
+</body>
+</html>

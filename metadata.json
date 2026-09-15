@@ -1,0 +1,6 @@
+{
+  "name": "분산형전원 여유용량 지도",
+  "description": "250m 격자 단위 한국전력 분산형전원 관할선로 여유용량 조회 및 관리자 엑셀 일괄 업데이트 지도 웹 앱",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

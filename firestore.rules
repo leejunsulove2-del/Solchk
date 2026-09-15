@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email in ["admin@kepco.co.kr", "admin@powergrid.kr"] ||
+        request.auth.token.email_verified == true
+      );
+    }
+
+    // 250m Grids Collection
+    match /grids/{gridId} {
+      // General public and users can read grid capacity data
+      allow read: if true;
+
+      // Only administrators can create, update or delete grids
+      allow create, update: if isAdmin() &&
+        request.resource.data.keys().hasAll(['gridId', 'south', 'west', 'north', 'east', 'lineName', 'capacity']) &&
+        request.resource.data.lineName is string &&
+        request.resource.data.lineName.size() <= 100 &&
+        request.resource.data.capacity is number &&
+        request.resource.data.south is number &&
+        request.resource.data.west is number &&
+        request.resource.data.north is number &&
+        request.resource.data.east is number;
+
+      allow delete: if isAdmin();
+    }
+
+    // Search Logs Collection (Inquiries History)
+    match /search_logs/{logId} {
+      // Allow everyone to read search inquiry history markers
+      allow read: if true;
+
+      // Allow users to record search queries
+      allow create: if request.resource.data.keys().hasAll(['lat', 'lng', 'searchedAt', 'lineName', 'capacity']) &&
+        request.resource.data.lat is number &&
+        request.resource.data.lng is number &&
+        request.resource.data.lineName is string &&
+        request.resource.data.lineName.size() <= 100 &&
+        request.resource.data.capacity is number;
+
+      // Search logs are immutable history
+      allow update, delete: if isAdmin();
+    }
+
+    // System Settings & API Config Collection
+    match /settings/{configId} {
+      // Configuration read/write
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Admin Users Collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+  }
+}
