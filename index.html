@@ -209,9 +209,14 @@
 
     <div class="mt-2.5 text-[11px] text-slate-500 flex items-center justify-between">
       <span id="cardCoordinateText">위도: 37.1635 / 경도: 126.9185</span>
-      <button id="adminQuickEditBtn" class="hidden text-blue-600 hover:text-blue-800 font-medium underline">
-        용량 직접 수정
-      </button>
+      <div class="flex items-center gap-2">
+        <button id="copyGridSettingsBtn" class="text-slate-600 hover:text-slate-900 font-medium underline">
+          격자 복사
+        </button>
+        <button id="adminQuickEditBtn" class="hidden text-blue-600 hover:text-blue-800 font-medium underline">
+          용량 직접 수정
+        </button>
+      </div>
     </div>
   </div>
 
@@ -334,6 +339,71 @@
               </button>
             </div>
           </div>
+
+          <!-- Line-specific Batch Management Section -->
+          <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/70">
+            <h4 class="text-xs font-bold text-slate-800 flex items-center gap-1.5 mb-2">
+              <svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+              선로별 일괄 관리 (배전선로 단위 용량 수정)
+            </h4>
+            <p class="text-[11px] text-slate-500 mb-3">
+              특정 배전선로 이름을 입력하고 용량을 입력하면, 해당 선로에 속한 모든 격자의 용량이 일괄 업데이트됩니다.
+            </p>
+            <div class="space-y-2.5">
+              <div>
+                <label class="block text-[11px] font-medium text-slate-600 mb-1">대상 배전선로 이름</label>
+                <input type="text" id="batchLineNameInput" placeholder="예: 팔탄D/L 01호" class="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 focus:outline-none bg-white" />
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <div>
+                  <label class="block text-[10px] text-slate-500 mb-0.5">변전소(kW)</label>
+                  <input type="number" id="batchSubCapInput" placeholder="변전소 용량" class="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 focus:outline-none bg-white" />
+                </div>
+                <div>
+                  <label class="block text-[10px] text-slate-500 mb-0.5">MTR(kW)</label>
+                  <input type="number" id="batchMtrCapInput" placeholder="MTR 용량" class="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 focus:outline-none bg-white" />
+                </div>
+                <div>
+                  <label class="block text-[10px] text-slate-500 mb-0.5">선로(kW)</label>
+                  <input type="number" id="batchLineCapInput" placeholder="선로 용량" class="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-purple-500 focus:outline-none bg-white" />
+                </div>
+              </div>
+              <button
+                type="button"
+                id="executeLineBatchUpdateBtn"
+                class="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-1 mt-1"
+              >
+                선로별 용량 일괄 적용하기
+              </button>
+            </div>
+          </div>
+
+          <!-- Backup & Export Section -->
+          <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/70">
+            <h4 class="text-xs font-bold text-slate-800 flex items-center gap-1.5 mb-2">
+              <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              데이터 백업 및 전체 추출 (Export)
+            </h4>
+            <p class="text-[11px] text-slate-500 mb-3">
+              현재 저장된 모든 격자 데이터와 관할 선로명(배전선로) 용량 설정을 추출합니다.
+            </p>
+            <div class="flex gap-2">
+              <button
+                type="button"
+                id="exportExcelBtn"
+                class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-1"
+              >
+                엑셀(Excel) 백업
+              </button>
+              <button
+                type="button"
+                id="exportJsonBtn"
+                class="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-1"
+              >
+                JSON 백업
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -369,9 +439,14 @@
           <label class="block font-medium text-slate-700 mb-1">선로 여유용량 (lineCap in kW)</label>
           <input type="number" id="editLineCap" placeholder="예: 3200 (선택)" class="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none" />
         </div>
-        <div class="pt-2 flex justify-end gap-2">
-          <button type="button" id="cancelEditBtn" class="px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-100 font-medium">취소</button>
-          <button type="submit" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold">저장하기</button>
+        <div class="pt-2 flex items-center justify-between">
+          <button type="button" id="pasteGridSettingsBtn" class="text-xs text-blue-600 hover:text-blue-800 font-medium underline">
+            📋 복사한 설정 붙여넣기
+          </button>
+          <div class="flex gap-2">
+            <button type="button" id="cancelEditBtn" class="px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-100 font-medium">취소</button>
+            <button type="submit" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold">저장하기</button>
+          </div>
         </div>
       </form>
     </div>
@@ -385,6 +460,14 @@
 
   <!-- Script -->
   <script>
+    window.onerror = function(msg, url, line, col, error) {
+      console.warn("Global caught error:", msg, url, line, col, error);
+      return true;
+    };
+    window.addEventListener('unhandledrejection', event => {
+      console.warn("Global unhandled rejection:", event.reason);
+    });
+
     const firebaseConfig = {
       apiKey: "AIzaSyA-CYKj_nVP8ysYpIlLYs-lWy5TT4zg3DE",
       authDomain: "solchk-8d9d4.firebaseapp.com",
@@ -417,6 +500,67 @@
 
     let gridsData = new Map(); // gridId -> grid object
     let searchLogsData = [];
+    let currentSelectedGrid = null;
+    let copiedGridSettings = null;
+
+    function applySharedLineSync(targetGrid) {
+      if (!targetGrid.lineName) return;
+      const ln = targetGrid.lineName.trim();
+      gridsData.forEach((grid, id) => {
+        if (grid.lineName && grid.lineName.trim() === ln) {
+          grid.substationCap = targetGrid.substationCap;
+          grid.mtrCap = targetGrid.mtrCap;
+          grid.lineCap = targetGrid.lineCap;
+          grid.updatedAt = new Date().toISOString();
+        }
+      });
+    }
+
+    function exportGridsExcel() {
+      const dataArr = [];
+      gridsData.forEach((grid, id) => {
+        dataArr.push({
+          gridId: grid.gridId,
+          south: grid.south,
+          west: grid.west,
+          north: grid.north,
+          east: grid.east,
+          lineName: grid.lineName || '',
+          substationCap: grid.substationCap !== null && grid.substationCap !== undefined ? grid.substationCap : '',
+          mtrCap: grid.mtrCap !== null && grid.mtrCap !== undefined ? grid.mtrCap : '',
+          lineCap: grid.lineCap !== null && grid.lineCap !== undefined ? grid.lineCap : '',
+          updatedAt: grid.updatedAt || ''
+        });
+      });
+      if (dataArr.length === 0) {
+        showToast('추출할 격자 데이터가 없습니다.', '⚠️');
+        return;
+      }
+      const ws = XLSX.utils.json_to_sheet(dataArr);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "전국격자용량데이터");
+      XLSX.writeFile(wb, `분산형전원_격자데이터_백업_${new Date().toISOString().slice(0,10)}.xlsx`);
+      showToast('엑셀 백업 파일이 생성되었습니다.', '📥');
+    }
+
+    function exportGridsJson() {
+      const dataArr = [];
+      gridsData.forEach((grid, id) => {
+        dataArr.push(grid);
+      });
+      if (dataArr.length === 0) {
+        showToast('추출할 격자 데이터가 없습니다.', '⚠️');
+        return;
+      }
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dataArr, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `분산형전원_격자데이터_백업_${new Date().toISOString().slice(0,10)}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast('JSON 백업 파일이 생성되었습니다.', '📥');
+    }
 
     const RATE_LIMIT_COOLDOWN_MS = 3 * 60 * 1000;
 
@@ -484,14 +628,14 @@
           console.log("Firebase initialized successfully.");
           setupRealtimeListeners();
         } catch (err) {
-          console.error("Firebase init error:", err);
+          console.warn("Firebase init error (operating in local offline cache mode):", err);
           isFirebaseConnected = false;
         }
       }
     }
 
     function setupRealtimeListeners() {
-      if (!db) return;
+      if (!db || !isFirebaseConnected) return;
 
       // Real-time synchronization for grids
       db.collection('grids').onSnapshot(snapshot => {
@@ -503,7 +647,7 @@
         });
         generateViewportGrids();
       }, err => {
-        console.warn("Grids snapshot error:", err);
+        console.warn("Grids snapshot offline fallback:", err);
       });
 
       // Real-time synchronization for search logs & history markers
@@ -514,7 +658,7 @@
         });
         renderHistoryMarkers();
       }, err => {
-        console.warn("Search logs snapshot error:", err);
+        console.warn("Search logs snapshot offline fallback:", err);
       });
     }
 
@@ -533,7 +677,9 @@
 
       if (isFirebaseConnected && db) {
         try {
-          const snap = await db.collection('grids').get();
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore timeout')), 4000));
+          const snapPromise = db.collection('grids').get();
+          const snap = await Promise.race([snapPromise, timeoutPromise]);
           snap.forEach(doc => {
             const data = doc.data();
             if (data && data.gridId) {
@@ -543,7 +689,8 @@
           console.log(`Loaded ${gridsData.size} configured grids from Firestore.`);
           generateViewportGrids();
         } catch (e) {
-          console.warn("Failed to load grids from Firestore", e);
+          console.warn("Firestore offline or unreachable, operating in local cache mode.", e);
+          isFirebaseConnected = false;
         }
       }
     }
@@ -669,6 +816,7 @@
     let activeTypingTimer = null;
 
     function showGridDetailCard(grid) {
+      currentSelectedGrid = grid;
       const card = document.getElementById('capacityDetailCard');
       const badge = document.getElementById('cardStatusBadge');
       const gridIdEl = document.getElementById('cardGridId');
@@ -791,24 +939,11 @@
       return { allowed: true };
     }
 
-    // 경기도 지역만 검색 가능하도록 제한
+    // 전국 주소 검색
     async function handleAddressSearch(e) {
       e.preventDefault();
       let query = document.getElementById('addressInput').value.trim();
       if (!query) return;
-
-      // 경기도 제한 검사: 검색어에 '경기' 또는 경기도 시/군 명칭이 포함되어 있지 않으면 '경기도 '를 자동 부여하거나 경기도 내 검색으로 유도
-      const gyeonggiKeywords = ['경기', '수원', '용인', '고양', '화성', '성남', '부천', '안산', '평택', '안양', '시흥', '파주', '의정부', '김포', '광주', '광명', '군포', '하남', '오산', '이천', '안성', '의왕', '포천', '양평', '여주', '동두천', '과천', '가평', '연천', '팔탄'];
-      const hasGyeonggi = gyeonggiKeywords.some(kw => query.includes(kw));
-
-      if (!hasGyeonggi) {
-        showToast('검색 지역은 경기도 내로 제한되어 있습니다. (예: 화성시 팔탄면)', '⚠️');
-        return;
-      }
-
-      if (!query.includes('경기')) {
-        query = '경기도 ' + query;
-      }
 
       const limitCheck = checkRateLimit();
       if (!limitCheck.allowed) {
@@ -816,12 +951,12 @@
         return;
       }
 
-      showToast('경기도 주소 검색 중...', '🔍');
+      showToast('전국 주소 검색 중...', '🔍');
 
       try {
         const point = await geocodeAddress(query);
         if (!point) {
-          showToast('경기도 내 해당 주소를 찾을 수 없습니다.', '⚠️');
+          showToast('해당 주소를 찾을 수 없습니다.', '⚠️');
           return;
         }
 
@@ -935,6 +1070,10 @@
       editingGridTarget.lineCap = lineCap;
       editingGridTarget.updatedAt = new Date().toISOString();
 
+      if (lineName) {
+        applySharedLineSync(editingGridTarget);
+      }
+
       // 1. Update memory & localStorage cache immediately
       gridsData.set(editingGridTarget.gridId, editingGridTarget);
       try {
@@ -947,17 +1086,25 @@
       generateViewportGrids();
       showGridDetailCard(editingGridTarget);
       document.getElementById('gridEditModal').classList.add('hidden');
-      showToast('격자 용량 설정이 성공적으로 저장되었습니다.', '✅');
+      showToast('격자 용량 설정 및 동일 선로 일괄 동기화가 완료되었습니다.', '✅');
 
-      // 3. Sync to Firestore in background
+      // 3. Sync to Firestore in background (sync all grids sharing the same lineName if applicable)
       if (isFirebaseConnected && db) {
-        db.collection('grids').doc(editingGridTarget.gridId).set(editingGridTarget, { merge: true })
-          .then(() => {
-            console.log("Firestore background sync successful.");
-          })
-          .catch(err => {
-            console.warn("Firestore background sync error:", err);
+        const batch = db.batch();
+        if (lineName) {
+          gridsData.forEach((g) => {
+            if (g.lineName && g.lineName.trim() === lineName.trim()) {
+              const ref = db.collection('grids').doc(g.gridId);
+              batch.set(ref, g, { merge: true });
+            }
           });
+        } else {
+          const ref = db.collection('grids').doc(editingGridTarget.gridId);
+          batch.set(ref, editingGridTarget, { merge: true });
+        }
+        batch.commit().catch(err => {
+          console.warn("Firestore background sync error:", err);
+        });
       }
     }
 
@@ -965,6 +1112,43 @@
       document.getElementById('addressSearchForm').addEventListener('submit', handleAddressSearch);
       document.getElementById('closeDetailCardBtn').addEventListener('click', () => {
         document.getElementById('capacityDetailCard').classList.add('hidden');
+      });
+      document.getElementById('copyGridSettingsBtn').addEventListener('click', () => {
+        if (!currentSelectedGrid) return;
+        copiedGridSettings = {
+          lineName: currentSelectedGrid.lineName,
+          substationCap: currentSelectedGrid.substationCap,
+          mtrCap: currentSelectedGrid.mtrCap,
+          lineCap: currentSelectedGrid.lineCap
+        };
+        showToast('현재 격자 설정(선로명 및 용량)이 복사되었습니다.', '📋');
+      });
+      document.getElementById('pasteGridSettingsBtn').addEventListener('click', () => {
+        if (!copiedGridSettings) {
+          showToast('복사된 격자 설정이 없습니다.', '⚠️');
+          return;
+        }
+        document.getElementById('editLineName').value = copiedGridSettings.lineName || '';
+        document.getElementById('editSubstationCap').value = copiedGridSettings.substationCap !== null && copiedGridSettings.substationCap !== undefined ? copiedGridSettings.substationCap : '';
+        document.getElementById('editMtrCap').value = copiedGridSettings.mtrCap !== null && copiedGridSettings.mtrCap !== undefined ? copiedGridSettings.mtrCap : '';
+        document.getElementById('editLineCap').value = copiedGridSettings.lineCap !== null && copiedGridSettings.lineCap !== undefined ? copiedGridSettings.lineCap : '';
+        showToast('복사된 설정이 붙여넣기 되었습니다.', '✨');
+      });
+      document.getElementById('exportExcelBtn').addEventListener('click', exportGridsExcel);
+      document.getElementById('exportJsonBtn').addEventListener('click', exportGridsJson);
+
+      document.getElementById('editLineName').addEventListener('blur', (e) => {
+        const val = e.target.value.trim();
+        if (!val) return;
+        for (const [id, grid] of gridsData.entries()) {
+          if (grid.lineName && grid.lineName.trim() === val) {
+            if (grid.substationCap !== null && grid.substationCap !== undefined) document.getElementById('editSubstationCap').value = grid.substationCap;
+            if (grid.mtrCap !== null && grid.mtrCap !== undefined) document.getElementById('editMtrCap').value = grid.mtrCap;
+            if (grid.lineCap !== null && grid.lineCap !== undefined) document.getElementById('editLineCap').value = grid.lineCap;
+            showToast(`동일한 선로명(${val})의 기존 용량값이 자동 입력되었습니다.`, '⚡');
+            break;
+          }
+        }
       });
       document.getElementById('adminLoginBtn').addEventListener('click', () => {
         document.getElementById('adminModal').classList.remove('hidden');
@@ -1066,6 +1250,63 @@
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "격자용량데이터");
         XLSX.writeFile(wb, "경기도_분산형전원_용량설정_샘플.xlsx");
+      });
+
+      document.getElementById('executeLineBatchUpdateBtn').addEventListener('click', async () => {
+        const lineNameVal = document.getElementById('batchLineNameInput').value.trim();
+        if (!lineNameVal) {
+          showToast('일괄 적용할 배전선로 이름을 입력해주세요.', '⚠️');
+          return;
+        }
+
+        const subVal = document.getElementById('batchSubCapInput').value.trim();
+        const mtrVal = document.getElementById('batchMtrCapInput').value.trim();
+        const lineVal = document.getElementById('batchLineCapInput').value.trim();
+
+        const substationCap = subVal !== '' ? parseFloat(subVal) : null;
+        const mtrCap = mtrVal !== '' ? parseFloat(mtrVal) : null;
+        const lineCap = lineVal !== '' ? parseFloat(lineVal) : null;
+
+        let matchCount = 0;
+        const batch = isFirebaseConnected && db ? db.batch() : null;
+
+        gridsData.forEach((grid, id) => {
+          if (grid.lineName && grid.lineName.trim() === lineNameVal) {
+            grid.substationCap = substationCap;
+            grid.mtrCap = mtrCap;
+            grid.lineCap = lineCap;
+            grid.updatedAt = new Date().toISOString();
+            matchCount++;
+
+            if (batch) {
+              const ref = db.collection('grids').doc(grid.gridId);
+              batch.set(ref, grid, { merge: true });
+            }
+          }
+        });
+
+        if (matchCount === 0) {
+          showToast(`'${lineNameVal}' 선로에 속한 격자를 찾지 못했습니다. (먼저 개별 격자에서 해당 선로명을 지정해주세요)`, '⚠️');
+          return;
+        }
+
+        try {
+          const localGrids = {};
+          gridsData.forEach((val, key) => { localGrids[key] = val; });
+          localStorage.setItem('dg_grids_local_cache', JSON.stringify(localGrids));
+        } catch (e) {}
+
+        if (batch) {
+          try {
+            await batch.commit();
+          } catch (err) {
+            console.warn("Firestore batch commit error:", err);
+          }
+        }
+
+        generateViewportGrids();
+        document.getElementById('adminModal').classList.add('hidden');
+        showToast(`'${lineNameVal}' 선로 소속 격자 ${matchCount}개의 용량이 일괄 업데이트되었습니다.`, '⚡');
       });
     }
 
