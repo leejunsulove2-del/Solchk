@@ -47,9 +47,45 @@
       font-size: 13px;
       line-height: 1.5;
     }
+    @keyframes rainbowGlow {
+      0% { color: #ef4444; text-shadow: 0 0 12px rgba(239,68,68,0.8); }
+      20% { color: #f97316; text-shadow: 0 0 12px rgba(249,115,22,0.8); }
+      40% { color: #eab308; text-shadow: 0 0 12px rgba(234,179,8,0.8); }
+      60% { color: #22c55e; text-shadow: 0 0 12px rgba(34,197,94,0.8); }
+      80% { color: #3b82f6; text-shadow: 0 0 12px rgba(59,130,246,0.8); }
+      100% { color: #a855f7; text-shadow: 0 0 12px rgba(168,85,247,0.8); }
+    }
+    .animate-rainbow {
+      animation: rainbowGlow 1.5s infinite linear;
+    }
   </style>
 </head>
 <body class="bg-slate-900 text-slate-800">
+
+  <!-- Suspended User Full-Screen Page (White background, black text) -->
+  <div id="suspensionOverlay" class="hidden fixed inset-0 z-[9999] bg-white text-slate-900 flex flex-col items-center justify-center p-6">
+    <div class="absolute top-6 right-6">
+      <button id="suspensionAdminLoginBtn" class="bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-slate-800 transition-colors">
+        관리자 로그인
+      </button>
+    </div>
+    <div class="max-w-md w-full text-center space-y-6">
+      <div class="w-16 h-16 rounded-full bg-slate-100 border border-slate-300 text-slate-800 mx-auto flex items-center justify-center text-2xl font-bold">
+        !
+      </div>
+      <h1 class="text-2xl font-extrabold tracking-tight">비정상 이용자로 정지되었습니다</h1>
+      <p class="text-xs text-slate-600 leading-relaxed">
+        비정상적인 대량 요청 및 이용 패턴이 감지되어 서비스 이용이 일시 중지되었습니다.
+      </p>
+      <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+        <div class="text-xs font-medium text-slate-500">제한 해제까지 남은 시간</div>
+        <div id="suspensionCountdown" class="text-2xl font-mono font-bold text-slate-900 mt-1">24:00:00</div>
+      </div>
+      <div id="suspensionWarningText" class="text-[11px] text-rose-600 font-medium hidden">
+        관리자 비밀번호 오류 3회 초과로 인해 7일간 접근이 정지되었으며, 반복 위반 시 영구 접속 중지가 적용됩니다. (기기 IP 기록 전송됨)
+      </div>
+    </div>
+  </div>
 
   <!-- Main Map Container -->
   <div id="map"></div>
@@ -60,7 +96,7 @@
     <!-- Title & Search Form Box -->
     <div class="pointer-events-auto flex items-center bg-white/95 backdrop-blur-md px-4 py-2.5 rounded-xl shadow-lg border border-slate-200/80 gap-3 w-full md:w-auto md:min-w-[440px] max-w-xl">
       <div class="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white shrink-0 font-bold text-xs shadow-sm">
-        KEPCO
+        JS.L
       </div>
       <div class="flex-1">
         <div class="flex items-center gap-2">
@@ -122,8 +158,8 @@
     </div>
   </header>
 
-  <!-- Capacity Legend (Floating Card) -->
-  <div class="absolute bottom-6 left-4 z-[1000] bg-white/95 backdrop-blur-md p-3.5 rounded-xl shadow-lg border border-slate-200/80 text-xs w-64 pointer-events-auto">
+  <!-- Capacity Legend (Floating Card - Desktop/Tablet) -->
+  <div class="hidden md:block absolute bottom-6 left-4 z-[1000] bg-white/95 backdrop-blur-md p-3.5 rounded-xl shadow-lg border border-slate-200/80 text-xs w-64 pointer-events-auto">
     <div class="flex items-center justify-between font-bold text-slate-800 mb-2">
       <span>최저 여유용량 범례</span>
       <span class="text-[10px] text-slate-500 font-normal">변전소·MTR·선로 중 최저값</span>
@@ -169,6 +205,19 @@
       <span>격자 클릭 시 상세 확인 및 설정</span>
       <span id="gridTotalCount" class="font-medium text-blue-600">0개 격자</span>
     </div>
+  </div>
+
+  <!-- Mobile Cycling Legend Bar (Single line cycling every 1s) -->
+  <div class="md:hidden absolute bottom-4 left-4 right-4 z-[1000] bg-white/95 backdrop-blur-md px-3 py-2 rounded-xl shadow-lg border border-slate-200/80 text-xs pointer-events-auto flex items-center justify-between">
+    <div class="flex items-center gap-2 overflow-hidden">
+      <span class="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold shrink-0">범례</span>
+      <div id="mobileLegendContainer" class="flex items-center gap-2 transition-opacity duration-300 truncate">
+        <span class="w-3 h-3 rounded bg-blue-500/20 border border-blue-600 inline-block shrink-0"></span>
+        <span class="font-bold text-slate-800 shrink-0">대규모 여유</span>
+        <span class="text-blue-700 font-semibold">&gt; 10,000 kW</span>
+      </div>
+    </div>
+    <span id="gridTotalCountMobile" class="text-[11px] font-medium text-blue-600 shrink-0 ml-2">0개 격자</span>
   </div>
 
   <!-- Bottom Info Card -->
@@ -747,10 +796,20 @@
     const LNG_250M = 0.002784;
 
     async function initApp() {
+      const suspensionUntil = parseInt(localStorage.getItem('dg_suspension_until') || '0', 10);
+      if (Date.now() < suspensionUntil) {
+        showSuspensionPage(suspensionUntil);
+        const lockout = localStorage.getItem('dg_admin_locked_out') === 'true';
+        if (lockout) {
+          document.getElementById('suspensionWarningText').classList.remove('hidden');
+        }
+      }
+
       initMap();
       initFirebase();
       await initVWorldKey();
       setupEventListeners();
+      startMobileLegendCycle();
       await loadGridsFromFirestore();
       generateViewportGrids();
     }
@@ -917,7 +976,7 @@
       // 최초 크기(DEFAULT_ZOOM = 13)보다 더 넓은 범위(zoom < 12)를 보는 경우 과도한 그리드 생성을 방지하고 렌더링하지 않음
       if (currentZoom < 12) {
         gridPolygonLayerGroup.clearLayers();
-        document.getElementById('gridTotalCount').textContent = '지도가 너무 넓습니다 (250m 격자 표시: 줌인 12단계 이상 필요)';
+        setGridTotalCountText('지도가 너무 넓습니다 (250m 격자 표시: 줌인 12단계 이상 필요)');
         return;
       }
 
@@ -962,7 +1021,25 @@
           }
 
           const effCap = calculateEffectiveCapacity(grid);
-          const colorInfo = getCapacityColor(effCap);
+          const uncoloredStyle = {
+            fill: '#cbd5e1',
+            border: '#94a3b8',
+            weight: 0,
+            fillOpacity: 0.03,
+            label: '미확인 영역',
+            badgeClass: 'bg-slate-100 text-slate-600'
+          };
+
+          let revealedMap = {};
+          try {
+            revealedMap = JSON.parse(localStorage.getItem('dg_revealed_grids') || '{}');
+          } catch (e) {}
+
+          const now = Date.now();
+          const revTime = revealedMap[gridId];
+          const isRevealed = revTime && (now - revTime < 24 * 60 * 60 * 1000);
+          const colorInfo = isRevealed ? getCapacityColor(effCap) : uncoloredStyle;
+
           const rectBounds = [[south, west], [north, east]];
 
           const isSelected = (currentSelectedGrid && currentSelectedGrid.gridId === gridId) || selectedGridIds.has(gridId);
@@ -999,7 +1076,8 @@
               document.getElementById('selectedGridCountBadge').textContent = selectedGridIds.size;
               generateViewportGrids();
             } else {
-              showGridDetailCard(grid);
+              if (isGridAnimating) return;
+              reveal49Grids(grid);
             }
           });
 
@@ -1008,7 +1086,155 @@
         }
       }
 
-      document.getElementById('gridTotalCount').textContent = `${count}개 격자 (뷰포트)`;
+      setGridTotalCountText(`${count}개 격자 (뷰포트)`);
+    }
+
+    function showSuspensionPage(suspendEnd) {
+      const overlay = document.getElementById('suspensionOverlay');
+      overlay.classList.remove('hidden');
+
+      const updateTimer = () => {
+        const remain = suspendEnd - Date.now();
+        if (remain <= 0) {
+          localStorage.removeItem('dg_suspension_until');
+          localStorage.removeItem('dg_click_count');
+          overlay.classList.add('hidden');
+          return;
+        }
+        const hrs = Math.floor(remain / 3600000);
+        const mins = Math.floor((remain % 3600000) / 60000);
+        const secs = Math.floor((remain % 60000) / 1000);
+        document.getElementById('suspensionCountdown').textContent = 
+          `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      };
+
+      updateTimer();
+      if (window.suspensionTimerInterval) clearInterval(window.suspensionTimerInterval);
+      window.suspensionTimerInterval = setInterval(updateTimer, 1000);
+    }
+
+    let isGridAnimating = false;
+
+    function reveal49Grids(centerGrid) {
+      if (isGridAnimating) return false;
+
+      if (!currentUser) {
+        const todayStr = new Date().toDateString();
+        const storedDate = localStorage.getItem('dg_click_date') || '';
+        let clickCount = parseInt(localStorage.getItem('dg_click_count') || '0', 10);
+        if (storedDate !== todayStr) {
+          localStorage.setItem('dg_click_date', todayStr);
+          clickCount = 0;
+        }
+        clickCount++;
+        localStorage.setItem('dg_click_count', clickCount.toString());
+
+        if (clickCount >= 50) {
+          const lockout = localStorage.getItem('dg_admin_locked_out') === 'true';
+          const duration = lockout ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+          const suspendEnd = Date.now() + duration;
+          localStorage.setItem('dg_suspension_until', suspendEnd.toString());
+          showSuspensionPage(suspendEnd);
+          return false;
+        } else if (clickCount >= 45 && clickCount <= 49) {
+          showToast('비정상 이용 감지로 이용제한이 검토됩니다.', '⚠️');
+        }
+      }
+
+      isGridAnimating = true;
+
+      const centerLatIdx = Math.round(centerGrid.south / LAT_250M);
+      const centerLngIdx = Math.round(centerGrid.west / LNG_250M);
+
+      const outerSouth = (centerLatIdx - 3) * LAT_250M;
+      const outerNorth = (centerLatIdx + 4) * LAT_250M;
+      const outerWest = (centerLngIdx - 3) * LNG_250M;
+      const outerEast = (centerLngIdx + 4) * LNG_250M;
+
+      const outerRect = L.rectangle([[outerSouth, outerWest], [outerNorth, outerEast]], {
+        color: '#ef4444',
+        weight: 2,
+        fill: false,
+        dashArray: '6,6'
+      }).addTo(map);
+
+      // Phase 1 (1 second): Pulsate red outline border thickness smoothly
+      setTimeout(() => { if (outerRect) outerRect.setStyle({ weight: 7 }); }, 200);
+      setTimeout(() => { if (outerRect) outerRect.setStyle({ weight: 2 }); }, 450);
+      setTimeout(() => { if (outerRect) outerRect.setStyle({ weight: 9 }); }, 750);
+      setTimeout(() => { if (outerRect) outerRect.setStyle({ weight: 4 }); }, 1000);
+
+      let revealedMap = {};
+      try {
+        revealedMap = JSON.parse(localStorage.getItem('dg_revealed_grids') || '{}');
+      } catch (e) {}
+
+      const rings = { 0: [], 1: [], 2: [], 3: [] };
+
+      for (let di = -3; di <= 3; di++) {
+        for (let dj = -3; dj <= 3; dj++) {
+          const dist = Math.max(Math.abs(di), Math.abs(dj));
+          const lat = (centerLatIdx + di) * LAT_250M;
+          const lng = (centerLngIdx + dj) * LNG_250M;
+          const south = Number(lat.toFixed(6));
+          const west = Number(lng.toFixed(6));
+          const gridId = `GRID-${Math.round(south * 1000)}_${Math.round(west * 1000)}`;
+
+          if (!gridsData.has(gridId)) {
+            gridsData.set(gridId, {
+              gridId,
+              south,
+              north: Number((south + LAT_250M).toFixed(6)),
+              west,
+              east: Number((west + LNG_250M).toFixed(6)),
+              lineName: null,
+              substationCap: null,
+              mtrCap: null,
+              lineCap: null,
+              updatedAt: null
+            });
+          }
+          rings[dist].push(gridId);
+        }
+      }
+
+      // Phase 2 (2 seconds): Slow wave ripple animation across 49 grids (500ms per ring starting at 1000ms)
+      [0, 1, 2, 3].forEach((ringIdx) => {
+        setTimeout(() => {
+          const timestamp = Date.now();
+          rings[ringIdx].forEach(id => {
+            revealedMap[id] = timestamp;
+          });
+          localStorage.setItem('dg_revealed_grids', JSON.stringify(revealedMap));
+          generateViewportGrids();
+        }, 1000 + (ringIdx * 500));
+      });
+
+      // Phase 3 (After 3000ms): Show rainbow glowing "조회가 완료되었습니다" banner for 3 seconds
+      setTimeout(() => {
+        const centerLatLng = [centerGrid.south + LAT_250M / 2, centerGrid.west + LNG_250M / 2];
+        const bannerIcon = L.divIcon({
+          className: 'custom-banner-icon',
+          html: '<div style="transform: translate(-50%, -50%);" class="bg-slate-900/95 text-white px-5 py-2.5 rounded-2xl shadow-2xl border border-white/30 font-extrabold text-sm animate-rainbow flex items-center gap-2 whitespace-nowrap">✨ 조회가 완료되었습니다 ✨</div>',
+          iconSize: [0, 0]
+        });
+        const bannerMarker = L.marker(centerLatLng, { icon: bannerIcon }).addTo(map);
+
+        // Keep outline and banner for 3 seconds, then cleanup and show detail card
+        setTimeout(() => {
+          if (outerRect) {
+            map.removeLayer(outerRect);
+          }
+          if (bannerMarker) {
+            map.removeLayer(bannerMarker);
+          }
+          isGridAnimating = false;
+          showGridDetailCard(centerGrid);
+          showToast('조회가 완료되었습니다.', '✅');
+        }, 3000);
+      }, 3000);
+
+      return true;
     }
 
     let activeRouletteTimer = null;
@@ -1193,6 +1419,7 @@
     // 전국 주소 검색
     async function handleAddressSearch(e) {
       e.preventDefault();
+      if (isGridAnimating) return;
       let query = document.getElementById('addressInput').value.trim();
       if (!query) return;
 
@@ -1242,9 +1469,7 @@
         const effCap = calculateEffectiveCapacity(grid);
         await recordSearchLog(lat, lng, grid.lineName || '미상', effCap !== null ? effCap : -1, grid.gridId);
 
-        generateViewportGrids();
-        showGridDetailCard(grid);
-        showToast('조회가 완료되었습니다.', '✅');
+        reveal49Grids(grid);
       } catch (err) {
         console.error(err);
         showToast('검색 중 오류가 발생했습니다.', '❌');
@@ -1253,7 +1478,7 @@
 
     async function geocodeAddress(address) {
       try {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=kr&limit=1`;
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=5`;
         const res = await fetch(url);
         const data = await res.json();
         if (data && data.length > 0) {
@@ -1404,24 +1629,51 @@
       document.getElementById('adminLoginBtn').addEventListener('click', () => {
         document.getElementById('adminModal').classList.remove('hidden');
       });
+      document.getElementById('suspensionAdminLoginBtn').addEventListener('click', () => {
+        document.getElementById('adminModal').classList.remove('hidden');
+      });
       document.getElementById('closeAdminModalBtn').addEventListener('click', () => {
         document.getElementById('adminModal').classList.add('hidden');
       });
 
-      // 관리자 로그인: 패스워드만 (3930)
+      // 관리자 로그인: 패스워드만 (3930) + 3회 오류 시 7일 정지 및 영구 정지 안내
       document.getElementById('authForm').addEventListener('submit', (e) => {
         e.preventDefault();
-        const password = document.getElementById('adminPassword').value;
+        let adminWrongAttempts = parseInt(localStorage.getItem('dg_admin_wrong_attempts') || '0', 10);
+        const adminLockedOut = localStorage.getItem('dg_admin_locked_out') === 'true';
         const errEl = document.getElementById('authErrorMsg');
         errEl.classList.add('hidden');
 
+        if (adminLockedOut) {
+          errEl.textContent = '비밀번호 오류 3회 초과로 관리자 로그인 기능이 영구 차단되었습니다. 7일간 접근이 정지됩니다.';
+          errEl.classList.remove('hidden');
+          return;
+        }
+
+        const password = document.getElementById('adminPassword').value;
+
         if (password === '3930') {
           currentUser = { role: 'admin' };
+          localStorage.setItem('dg_admin_wrong_attempts', '0');
+          localStorage.removeItem('dg_suspension_until');
+          localStorage.setItem('dg_click_count', '0');
+          document.getElementById('suspensionOverlay').classList.add('hidden');
           updateAdminUIState(currentUser);
           document.getElementById('adminModal').classList.add('hidden');
           showToast('관리자로 로그인되었습니다.', '🛡️');
         } else {
-          errEl.textContent = '패스워드가 올바르지 않습니다. (비밀번호: 3930)';
+          adminWrongAttempts++;
+          localStorage.setItem('dg_admin_wrong_attempts', adminWrongAttempts.toString());
+          if (adminWrongAttempts >= 3) {
+            localStorage.setItem('dg_admin_locked_out', 'true');
+            const suspendEnd = Date.now() + 7 * 24 * 60 * 60 * 1000;
+            localStorage.setItem('dg_suspension_until', suspendEnd.toString());
+            document.getElementById('suspensionWarningText').classList.remove('hidden');
+            showSuspensionPage(suspendEnd);
+            errEl.textContent = '패스워드 3회 오류! 비정상 관리자 접근으로 기기 IP가 차단되어 7일간 정지되며, 영구 접속 중지가 적용될 수 있습니다.';
+          } else {
+            errEl.textContent = `패스워드가 올바르지 않습니다. (남은 시도: ${3 - adminWrongAttempts}회)`;
+          }
           errEl.classList.remove('hidden');
         }
       });
@@ -1923,6 +2175,40 @@
       toast.classList.remove('hidden');
       if (toastTimeout) clearTimeout(toastTimeout);
       toastTimeout = setTimeout(() => toast.classList.add('hidden'), 3200);
+    }
+
+    function setGridTotalCountText(txt) {
+      const el1 = document.getElementById('gridTotalCount');
+      const el2 = document.getElementById('gridTotalCountMobile');
+      if (el1) el1.textContent = txt;
+      if (el2) el2.textContent = txt;
+    }
+
+    const mobileLegendItems = [
+      { colorBg: 'bg-blue-500/20 border-blue-600', label: '대규모 여유', val: '> 10,000 kW', valColor: 'text-blue-700' },
+      { colorBg: 'bg-emerald-500/20 border-emerald-600', label: '여유 충분', val: '≥ 2,000 kW', valColor: 'text-emerald-700' },
+      { colorBg: 'bg-amber-500/20 border-amber-600', label: '잔여 여유', val: '1 ~ 1,999 kW', valColor: 'text-amber-700' },
+      { colorBg: 'bg-rose-500/20 border-rose-600', label: '용량 포화', val: '0 kW', valColor: 'text-rose-700' },
+      { colorBg: 'bg-slate-400/10 border-transparent', label: '미상 (미설정)', val: '선택 전 숨김', valColor: 'text-slate-600' }
+    ];
+    let mobileLegendIndex = 0;
+    function startMobileLegendCycle() {
+      setInterval(() => {
+        mobileLegendIndex = (mobileLegendIndex + 1) % mobileLegendItems.length;
+        const item = mobileLegendItems[mobileLegendIndex];
+        const container = document.getElementById('mobileLegendContainer');
+        if (container) {
+          container.style.opacity = '0';
+          setTimeout(() => {
+            container.innerHTML = `
+              <span class="w-3 h-3 rounded ${item.colorBg} border inline-block shrink-0"></span>
+              <span class="font-bold text-slate-800 shrink-0">${item.label}</span>
+              <span class="${item.valColor} font-semibold">${item.val}</span>
+            `;
+            container.style.opacity = '1';
+          }, 150);
+        }
+      }, 1000);
     }
 
     window.addEventListener('DOMContentLoaded', initApp);
