@@ -2198,49 +2198,73 @@
       });
 
       document.getElementById('confirmAddressBatchBtn').addEventListener('click', async () => {
-        if (!pendingAddressBatchData || pendingAddressBatchData.length === 0) return;
-
-        const addressGridsToSave = [];
-        pendingAddressBatchData.forEach(item => {
-          let grid = gridsData.get(item.gridId);
-          if (!grid) {
-            grid = {
-              gridId: item.gridId,
-              south: item.south,
-              north: item.north,
-              west: item.west,
-              east: item.east,
-              lineName: item.lineName,
-              substationCap: null,
-              mtrCap: null,
-              lineCap: null,
-              updatedAt: item.updatedAt
-            };
-          } else {
-            grid.lineName = item.lineName;
-            grid.updatedAt = item.updatedAt;
-          }
-          gridsData.set(item.gridId, grid);
-          addressGridsToSave.push(grid);
-        });
-
-        try {
-          const localGrids = {};
-          gridsData.forEach((val, key) => { localGrids[key] = val; });
-          localStorage.setItem('dg_grids_local_cache', JSON.stringify(localGrids));
-        } catch (e) {}
-
-        if (isFirebaseConnected && db) {
-          await commitBatchInChunks(addressGridsToSave, (batch, grid) => {
-            const ref = db.collection('grids').doc(grid.gridId);
-            batch.set(ref, grid, { merge: true });
-          });
+        if (!pendingAddressBatchData || pendingAddressBatchData.length === 0) {
+          showToast('반영할 주소 데이터가 없습니다.', '⚠️');
+          return;
         }
 
-        generateViewportGrids();
-        document.getElementById('adminModal').classList.add('hidden');
-        showToast(`주소지 기반 ${pendingAddressBatchData.length}개 격자 배전선로 일괄 등록 완료!`, '🎉');
-        pendingAddressBatchData = null;
+        const btn = document.getElementById('confirmAddressBatchBtn');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'DB 반영 중...';
+
+        try {
+          const addressGridsToSave = [];
+          pendingAddressBatchData.forEach(item => {
+            let grid = gridsData.get(item.gridId);
+            if (!grid) {
+              grid = {
+                gridId: item.gridId,
+                south: item.south,
+                north: item.north,
+                west: item.west,
+                east: item.east,
+                lineName: item.lineName,
+                substationCap: null,
+                mtrCap: null,
+                lineCap: null,
+                updatedAt: item.updatedAt
+              };
+            } else {
+              grid.lineName = item.lineName;
+              grid.updatedAt = item.updatedAt;
+            }
+            gridsData.set(item.gridId, grid);
+            addressGridsToSave.push(grid);
+          });
+
+          try {
+            const localGrids = {};
+            gridsData.forEach((val, key) => { localGrids[key] = val; });
+            localStorage.setItem('dg_grids_local_cache', JSON.stringify(localGrids));
+          } catch (e) {
+            console.warn("Local storage save error:", e);
+          }
+
+          if (isFirebaseConnected && db) {
+            try {
+              await commitBatchInChunks(addressGridsToSave, (batch, grid) => {
+                const ref = db.collection('grids').doc(grid.gridId);
+                batch.set(ref, grid, { merge: true });
+              });
+            } catch (fbErr) {
+              console.warn("Firebase batch commit error:", fbErr);
+            }
+          }
+
+          generateViewportGrids();
+          document.getElementById('adminModal').classList.add('hidden');
+          document.getElementById('addressBatchConfirmBox').classList.add('hidden');
+          document.getElementById('addressBatchStatusArea').classList.add('hidden');
+          showToast(`주소지 기반 ${pendingAddressBatchData.length}개 격자 배전선로 일괄 등록 완료!`, '🎉');
+          pendingAddressBatchData = null;
+        } catch (err) {
+          console.error("Address batch confirmation error:", err);
+          showToast('데이터 반영 중 오류가 발생했습니다.', '❌');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
       });
 
       // Line Export & Import Handlers
