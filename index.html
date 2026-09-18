@@ -1188,8 +1188,8 @@
           const activeFillOpacity = colorInfo.fillOpacity * 1.5;
           const unselectedFillOpacity = colorInfo.fillOpacity;
           const polygonFillOpacity = isSelected ? activeFillOpacity : unselectedFillOpacity;
-          const polygonWeight = isSelected ? 2 : colorInfo.weight;
-          const polygonColor = isSelected ? '#7c3aed' : colorInfo.border;
+          const polygonWeight = isSelected ? 2 : 0;
+          const polygonColor = isSelected ? '#7c3aed' : 'transparent';
 
           const polygon = L.rectangle(rectBounds, {
             color: polygonColor,
@@ -2265,8 +2265,8 @@
             const chunk = json.slice(i, i + CHUNK_SIZE);
             await Promise.all(chunk.map(async (row) => {
               const vals = Object.values(row);
-              const address = String(row.주소 || row.address || row.Address || row.ADDR || vals[0] || '').trim();
-              const lineName = String(row.배전선로이름 || row.배전선로명 || row.lineName || row.LineName || vals[1] || '미상선로').trim();
+              const address = String(vals[0] || row.주소 || row.address || row.Address || row.ADDR || row.소재지 || row.위치 || '').trim();
+              const lineName = String(vals[1] || row.배전선로이름 || row.배전선로명 || row.lineName || row.LineName || row.선로명 || '미상선로').trim();
               
               if (!address) return;
 
@@ -2285,7 +2285,7 @@
             }));
 
             const processedCount = Math.min(i + CHUNK_SIZE, json.length);
-            statusText.textContent = `고속 주소 분석 중 (${processedCount} / ${json.length}) - 성공: ${geocodedCount}건`;
+            statusText.innerHTML = `<span class="inline-block animate-spin mr-1.5">⏳</span> 주소 분석 진행 중... (${processedCount} / ${json.length}건, ${Math.round((processedCount / json.length) * 100)}%) - 성공 매칭: ${geocodedCount}건`;
             progressBar.style.width = `${Math.round((processedCount / json.length) * 100)}%`;
           }
 
