@@ -456,7 +456,7 @@
                 필수 필드: <code class="bg-white px-1 py-0.5 rounded border border-slate-200 text-[10px]">gridId, south, west, north, east, lineName, substationCap, mtrCap, lineCap</code>
               </p>
               <label class="border-2 border-dashed border-slate-300 hover:border-blue-400 bg-white rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors text-center">
-                <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" class="hidden" />
+                <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv, .txt" class="hidden" />
                 <svg class="w-8 h-8 text-slate-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
                 <span class="text-xs font-medium text-slate-700">엑셀(.xlsx) 또는 CSV 파일 선택</span>
               </label>
@@ -613,7 +613,7 @@
                 엑셀 서식: <strong>A열(주소)</strong>, <strong>B열(배전선로이름)</strong>. 지연 없이 고속으로 순차 분석하며, 동일 격자 내 다수 주소는 다수결(최빈값) 선로명으로 자동 결정됩니다.
               </p>
               <label class="border-2 border-dashed border-slate-300 hover:border-indigo-400 bg-white rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors text-center">
-                <input type="file" id="addressExcelFileInput" accept=".xlsx, .xls, .csv" class="hidden" />
+                <input type="file" id="addressExcelFileInput" accept=".xlsx, .xls, .csv, .txt" class="hidden" />
                 <svg class="w-8 h-8 text-slate-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
                 <span class="text-xs font-medium text-slate-700">주소 엑셀(.xlsx) 파일 선택</span>
               </label>
@@ -659,7 +659,7 @@
                 <div class="border-t border-slate-200 pt-2.5">
                   <label class="block text-[11px] font-medium text-slate-600 mb-1">선로별 용량 엑셀 업로드 (선로명 매칭 업데이트)</label>
                   <label class="border-2 border-dashed border-slate-300 hover:border-teal-400 bg-white rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer transition-colors text-center">
-                    <input type="file" id="importLineCapacitiesFileInput" accept=".xlsx, .xls, .csv" class="hidden" />
+                    <input type="file" id="importLineCapacitiesFileInput" accept=".xlsx, .xls, .csv, .txt" class="hidden" />
                     <span class="text-xs font-medium text-slate-700">선로 용량 수정본 엑셀 선택</span>
                   </label>
                 </div>
@@ -945,6 +945,7 @@
 
     async function loadGridsFromFirestore() {
       // 1. 사용자 기기(localStorage)에 무제한 영구 유지된 캐시 먼저 로드 (서버 호출 0회)
+      let hasCachedData = false;
       try {
         const cached = localStorage.getItem('dg_grids_local_cache');
         if (cached) {
@@ -952,29 +953,44 @@
           Object.keys(parsed).forEach(k => {
             gridsData.set(k, parsed[k]);
           });
+          hasCachedData = gridsData.size > 0;
           generateViewportGrids();
         }
       } catch (e) {}
 
-      // 2. 최초 실행 시 단 1회 대량 조회(Bulk Get)로 파이어베이스 무료플랜에 가장 유리하게 동기화 후 무제한 기기 저장
+      // 2. 파이어베이스 무료플랜 최적화: 마지막 동기화 후 24시간 이내 재접속인 경우 Firestore 읽기 0회 (캐시 활용)
+      const lastSyncTime = localStorage.getItem('dg_grids_last_sync_time');
+      const now = Date.now();
+      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+
+      if (hasCachedData && lastSyncTime && (now - Number(lastSyncTime) < TWENTY_FOUR_HOURS)) {
+        console.log("Using 24h local cache. Skipping Firestore bulk get to save free tier read quota.");
+        return;
+      }
+
+      // 3. 24시간이 경과했거나 캐시가 없는 경우에만 최초 1회 단일 문서 요청(Single Doc Get) 수행 (서버 요청 1회)
       if (isFirebaseConnected && db) {
         try {
           const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore timeout')), 4000));
-          const snapPromise = db.collection('grids').get();
-          const snap = await Promise.race([snapPromise, timeoutPromise]);
-          snap.forEach(doc => {
-            const data = doc.data();
-            if (data && data.gridId) {
-              gridsData.set(data.gridId, data);
+          const docPromise = db.collection('system').doc('all_grids_bundle').get();
+          const docSnap = await Promise.race([docPromise, timeoutPromise]);
+          
+          if (docSnap.exists) {
+            const data = docSnap.data();
+            if (data && data.grids) {
+              Object.keys(data.grids).forEach(k => {
+                gridsData.set(k, data.grids[k]);
+              });
             }
-          });
+          }
 
-          // 기기에 무제한 영구 유지 저장
+          // 기기에 무제한 영구 유지 저장 및 동기화 시점 갱신
           const localGrids = {};
           gridsData.forEach((val, key) => { localGrids[key] = val; });
           localStorage.setItem('dg_grids_local_cache', JSON.stringify(localGrids));
+          localStorage.setItem('dg_grids_last_sync_time', now.toString());
 
-          console.log(`Loaded ${gridsData.size} configured grids from Firestore (Free tier optimized 1-time bulk read).`);
+          console.log(`Loaded ${gridsData.size} grids from Firestore single bundle document (1 server request).`);
           generateViewportGrids();
         } catch (e) {
           console.warn("Firestore offline or unreachable, operating in local cache mode.", e);
@@ -990,48 +1006,73 @@
     // 1 ~ 1,999 kW: 주황색
     // 0 kW: 빨간색
     // 미상/미설정: 회색 (선택 전 실선 숨김: weight: 0)
-    function calculateEffectiveCapacity(grid) {
-      const sub = Number(grid.substationCap);
-      const mtr = Number(grid.mtrCap);
-      const line = Number(grid.lineCap);
+    window.globalLineCapacities = new Map();
 
-      const hasSub = !isNaN(sub) && grid.substationCap !== null && grid.substationCap !== undefined && grid.substationCap !== '';
-      const hasMtr = !isNaN(mtr) && grid.mtrCap !== null && grid.mtrCap !== undefined && grid.mtrCap !== '';
-      const hasLine = !isNaN(line) && grid.lineCap !== null && grid.lineCap !== undefined && grid.lineCap !== '';
+    function calculateEffectiveCapacity(grid) {
+      let sub = grid.substationCap;
+      let mtr = grid.mtrCap;
+      let line = grid.lineCap;
+
+      if ((sub === null || sub === undefined || sub === '' || isNaN(sub)) && grid.lineName && window.globalLineCapacities && window.globalLineCapacities.has(grid.lineName.trim())) {
+        const lineCapObj = window.globalLineCapacities.get(grid.lineName.trim());
+        if (sub === null || sub === undefined || sub === '' || isNaN(sub)) sub = lineCapObj.substationCap;
+        if (mtr === null || mtr === undefined || mtr === '' || isNaN(mtr)) mtr = lineCapObj.mtrCap;
+        if (line === null || line === undefined || line === '' || isNaN(line)) line = lineCapObj.lineCap;
+      }
+
+      const subNum = Number(sub);
+      const mtrNum = Number(mtr);
+      const lineNum = Number(line);
+
+      const hasSub = !isNaN(subNum) && sub !== null && sub !== undefined && sub !== '';
+      const hasMtr = !isNaN(mtrNum) && mtr !== null && mtr !== undefined && mtr !== '';
+      const hasLine = !isNaN(lineNum) && line !== null && line !== undefined && line !== '';
 
       if (!hasSub && !hasMtr && !hasLine) return null;
 
       const vals = [];
-      if (hasSub) vals.push(sub);
-      if (hasMtr) vals.push(mtr);
-      if (hasLine) vals.push(line);
+      if (hasSub) vals.push(subNum);
+      if (hasMtr) vals.push(mtrNum);
+      if (hasLine) vals.push(lineNum);
 
+      if (vals.length === 0) return null;
       return Math.min(...vals);
     }
 
     function getCapacityColor(effCap) {
       if (effCap === null || effCap === undefined || Number.isNaN(effCap)) {
-        return { fill: '#94a3b8', border: 'transparent', weight: 0, fillOpacity: 0.04, label: '미상 (미설정)', badgeClass: 'bg-slate-100 text-slate-700' };
+        return { fill: '#94a3b8', border: '#cbd5e1', weight: 0.5, fillOpacity: 0.08, label: '미상 (미설정)', badgeClass: 'bg-slate-100 text-slate-700' };
       }
       if (effCap > 10000) {
-        return { fill: '#3b82f6', border: '#2563eb', weight: 0, fillOpacity: 0.11, label: '대규모 여유 (>10MW)', badgeClass: 'bg-blue-100 text-blue-800' };
+        return { fill: '#3b82f6', border: '#2563eb', weight: 1, fillOpacity: 0.20, label: '대규모 여유 (>10MW)', badgeClass: 'bg-blue-100 text-blue-800' };
       }
       if (effCap >= 2000) {
-        return { fill: '#10b981', border: '#059669', weight: 0, fillOpacity: 0.10, label: '여유 충분', badgeClass: 'bg-emerald-100 text-emerald-800' };
+        return { fill: '#10b981', border: '#059669', weight: 1, fillOpacity: 0.20, label: '여유 충분', badgeClass: 'bg-emerald-100 text-emerald-800' };
       }
       if (effCap > 0) {
-        return { fill: '#f59e0b', border: '#d97706', weight: 0, fillOpacity: 0.10, label: '잔여 여유', badgeClass: 'bg-amber-100 text-amber-800' };
+        return { fill: '#f59e0b', border: '#d97706', weight: 1, fillOpacity: 0.20, label: '잔여 여유', badgeClass: 'bg-amber-100 text-amber-800' };
       }
-      return { fill: '#ef4444', border: '#dc2626', weight: 0, fillOpacity: 0.11, label: '용량 포화', badgeClass: 'bg-rose-100 text-rose-800' };
+      return { fill: '#ef4444', border: '#dc2626', weight: 1, fillOpacity: 0.22, label: '용량 포화', badgeClass: 'bg-rose-100 text-rose-800' };
     }
 
     let isMultiSelectMode = false;
     let selectedGridIds = new Set();
 
-    // 화면 뷰포트(Bounds) 기반으로 전국 어디서나 250m 격자망 동적 생성 (미설정 구간은 회색, 실선 숨김)
+    // 화면 뷰포트(Bounds) 기반으로 전국 어디서나 250m 격자망 동적 생성 (항상 색상 즉시 표시)
     function generateViewportGrids() {
+      // Rebuild shared line capacities cache
+      window.globalLineCapacities.clear();
+      gridsData.forEach(g => {
+        if (g.lineName && (g.substationCap !== null || g.mtrCap !== null || g.lineCap !== null)) {
+          window.globalLineCapacities.set(g.lineName.trim(), {
+            substationCap: g.substationCap,
+            mtrCap: g.mtrCap,
+            lineCap: g.lineCap
+          });
+        }
+      });
+
       const currentZoom = map.getZoom();
-      // 최초 크기(DEFAULT_ZOOM = 13)보다 더 넓은 범위(zoom < 12)를 보는 경우 과도한 그리드 생성을 방지하고 렌더링하지 않음
       if (currentZoom < 12) {
         gridPolygonLayerGroup.clearLayers();
         setGridTotalCountText('지도가 너무 넓습니다 (250m 격자 표시: 줌인 12단계 이상 필요)');
@@ -1042,7 +1083,6 @@
       const southWest = bounds.getSouthWest();
       const northEast = bounds.getNorthEast();
 
-      // 위경도 범위 내 250m 단위 스냅 계산
       const sLat = Math.floor(southWest.lat / LAT_250M) * LAT_250M;
       const nLat = Math.ceil(northEast.lat / LAT_250M) * LAT_250M;
       const wLng = Math.floor(southWest.lng / LNG_250M) * LNG_250M;
@@ -1058,10 +1098,8 @@
           const west = Number(lng.toFixed(6));
           const east = Number((lng + LNG_250M).toFixed(6));
 
-          // 고유 gridId 생성 (좌표 기반)
           const gridId = `GRID-${Math.round(south * 1000)}_${Math.round(west * 1000)}`;
 
-          // 기존 설정된 데이터가 있으면 가져오고, 없으면 미상 기본값
           let grid = gridsData.get(gridId);
           if (!grid) {
             grid = {
@@ -1079,29 +1117,12 @@
           }
 
           const effCap = calculateEffectiveCapacity(grid);
-          const uncoloredStyle = {
-            fill: '#cbd5e1',
-            border: '#94a3b8',
-            weight: 0,
-            fillOpacity: 0.03,
-            label: '미확인 영역',
-            badgeClass: 'bg-slate-100 text-slate-600'
-          };
-
-          let revealedMap = {};
-          try {
-            revealedMap = JSON.parse(localStorage.getItem('dg_revealed_grids') || '{}');
-          } catch (e) {}
-
-          const now = Date.now();
-          const revTime = revealedMap[gridId];
-          const isRevealed = revTime && (now - revTime < 24 * 60 * 60 * 1000);
-          const colorInfo = isRevealed ? getCapacityColor(effCap) : uncoloredStyle;
+          const colorInfo = getCapacityColor(effCap);
 
           const rectBounds = [[south, west], [north, east]];
 
           const isSelected = (currentSelectedGrid && currentSelectedGrid.gridId === gridId) || selectedGridIds.has(gridId);
-          const activeFillOpacity = colorInfo.fillOpacity * 2;
+          const activeFillOpacity = colorInfo.fillOpacity * 1.5;
           const unselectedFillOpacity = colorInfo.fillOpacity;
           const polygonFillOpacity = isSelected ? activeFillOpacity : unselectedFillOpacity;
           const polygonWeight = isSelected ? 2 : colorInfo.weight;
@@ -1115,7 +1136,6 @@
             className: 'transition-all cursor-pointer'
           });
 
-          // 마우스 오버 시 실선 테두리 표시
           polygon.on('mouseover', () => {
             polygon.setStyle({ weight: 1.5, color: '#3b82f6', fillOpacity: activeFillOpacity });
           });
@@ -1134,8 +1154,7 @@
               document.getElementById('selectedGridCountBadge').textContent = selectedGridIds.size;
               generateViewportGrids();
             } else {
-              if (isGridAnimating) return;
-              reveal49Grids(grid);
+              showGridDetailCard(grid);
             }
           });
 
@@ -1732,41 +1751,28 @@
       document.getElementById('gridEditModal').classList.add('hidden');
       showToast('격자 용량 설정 및 동일 선로 일괄 동기화가 완료되었습니다.', '✅');
 
-      // 3. Sync to Firestore in background (sync all grids sharing the same lineName if applicable)
+      // 3. Sync to Firestore in background (single bundle document update - 1 server request)
       if (isFirebaseConnected && db) {
-        const batch = db.batch();
-        if (lineName) {
-          gridsData.forEach((g) => {
-            if (g.lineName && g.lineName.trim() === lineName.trim()) {
-              const ref = db.collection('grids').doc(g.gridId);
-              batch.set(ref, g, { merge: true });
-            }
-          });
-        } else {
-          const ref = db.collection('grids').doc(editingGridTarget.gridId);
-          batch.set(ref, editingGridTarget, { merge: true });
-        }
-        batch.commit().catch(err => {
-          console.warn("Firestore background sync error:", err);
-        });
+        saveAllGridsBundleToFirestore();
+      }
+    }
+
+    async function saveAllGridsBundleToFirestore() {
+      if (!isFirebaseConnected || !db) return;
+      try {
+        const localGrids = {};
+        gridsData.forEach((val, key) => { localGrids[key] = val; });
+        await db.collection('system').doc('all_grids_bundle').set({
+          grids: localGrids,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Firestore bundle save error:", err);
       }
     }
 
     async function commitBatchInChunks(items, setDataFn) {
-      if (!isFirebaseConnected || !db || !items || items.length === 0) return;
-      const CHUNK_SIZE = 400;
-      for (let i = 0; i < items.length; i += CHUNK_SIZE) {
-        const chunk = items.slice(i, i + CHUNK_SIZE);
-        const batch = db.batch();
-        chunk.forEach(item => {
-          setDataFn(batch, item);
-        });
-        try {
-          await batch.commit();
-        } catch (err) {
-          console.warn("Firestore batch chunk commit error:", err);
-        }
-      }
+      await saveAllGridsBundleToFirestore();
     }
 
     function setupEventListeners() {
@@ -1877,55 +1883,85 @@
         document.getElementById('gridEditModal').classList.add('hidden');
       });
 
-      // SheetJS Excel Upload
-      document.getElementById('excelFileInput').addEventListener('change', (e) => {
+      // Universal File Parser for Excel, CSV, TXT with Header Mismatch Fallback
+      function parseFileToJSON(file) {
+        return new Promise((resolve, reject) => {
+          const ext = file.name.split('.').pop().toLowerCase();
+          const reader = new FileReader();
+          if (ext === 'csv' || ext === 'txt') {
+            reader.onload = (evt) => {
+              try {
+                const text = evt.target.result;
+                const workbook = XLSX.read(text, { type: 'string' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+                resolve(json);
+              } catch (err) {
+                reject(err);
+              }
+            };
+            reader.readAsText(file, 'utf-8');
+          } else {
+            reader.onload = (evt) => {
+              try {
+                const data = new Uint8Array(evt.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+                resolve(json);
+              } catch (err) {
+                reject(err);
+              }
+            };
+            reader.readAsArrayBuffer(file);
+          }
+        });
+      }
+
+      document.getElementById('excelFileInput').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-          try {
-            const data = new Uint8Array(evt.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const json = XLSX.utils.sheet_to_json(sheet);
-            if (!json || json.length === 0) {
-              showToast('엑셀 파일에 데이터가 없습니다.', '⚠️');
-              return;
-            }
-
-            const parsed = json.map((row, idx) => ({
-              gridId: String(row.gridId || row.GridId || `GRID-EX-${idx+1}`),
-              south: parseFloat(row.south || row.South),
-              west: parseFloat(row.west || row.West),
-              north: parseFloat(row.north || row.North),
-              east: parseFloat(row.east || row.East),
-              lineName: String(row.lineName || row.LineName || '선로명'),
-              substationCap: parseFloat(row.substationCap || row.SubstationCap || 0),
-              mtrCap: parseFloat(row.mtrCap || row.MtrCap || 0),
-              lineCap: parseFloat(row.lineCap || row.LineCap || 0),
-              updatedAt: new Date().toISOString()
-            }));
-
-            if (isFirebaseConnected && db) {
-              await commitBatchInChunks(parsed, (batch, item) => {
-                const ref = db.collection('grids').doc(item.gridId);
-                batch.set(ref, item, { merge: true });
-              });
-            }
-
-            parsed.forEach(item => {
-              gridsData.set(item.gridId, item);
-            });
-
-            generateViewportGrids();
-            document.getElementById('adminModal').classList.add('hidden');
-            showToast(`엑셀 데이터 ${parsed.length}건이 성공적으로 반영되었습니다.`, '🎉');
-          } catch (err) {
-            console.error(err);
-            showToast('엑셀 파일 처리 중 오류 발생', '❌');
+        try {
+          const json = await parseFileToJSON(file);
+          if (!json || json.length === 0) {
+            showToast('파일에 데이터가 없습니다.', '⚠️');
+            return;
           }
-        };
-        reader.readAsArrayBuffer(file);
+
+          const parsed = json.map((row, idx) => {
+            const vals = Object.values(row);
+            return {
+              gridId: String(row.gridId || row.GridId || row.GRID_ID || vals[0] || `GRID-EX-${idx+1}`),
+              south: parseFloat(row.south || row.South || vals[1] || 37.0),
+              west: parseFloat(row.west || row.West || vals[2] || 127.0),
+              north: parseFloat(row.north || row.North || vals[3] || (parseFloat(vals[1] || 37.0) + LAT_250M)),
+              east: parseFloat(row.east || row.East || vals[4] || (parseFloat(vals[2] || 127.0) + LNG_250M)),
+              lineName: String(row.lineName || row.LineName || row.배전선로명 || vals[5] || '선로명'),
+              substationCap: parseFloat(row.substationCap || row.SubstationCap || row.변전소용량_kW || vals[6] || 0),
+              mtrCap: parseFloat(row.mtrCap || row.MtrCap || row.MTR용량_kW || vals[7] || 0),
+              lineCap: parseFloat(row.lineCap || row.LineCap || row.선로용량_kW || vals[8] || 0),
+              updatedAt: new Date().toISOString()
+            };
+          });
+
+          if (isFirebaseConnected && db) {
+            await commitBatchInChunks(parsed, (batch, item) => {
+              const ref = db.collection('grids').doc(item.gridId);
+              batch.set(ref, item, { merge: true });
+            });
+          }
+
+          parsed.forEach(item => {
+            gridsData.set(item.gridId, item);
+          });
+
+          generateViewportGrids();
+          document.getElementById('adminModal').classList.add('hidden');
+          showToast(`파일 데이터 ${parsed.length}건이 성공적으로 반영되었습니다.`, '🎉');
+        } catch (err) {
+          console.error(err);
+          showToast('파일 처리 중 오류 발생', '❌');
+        }
       });
 
       document.getElementById('downloadSampleExcelBtn').addEventListener('click', () => {
@@ -2104,90 +2140,84 @@
       document.getElementById('addressExcelFileInput').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-          try {
-            const data = new Uint8Array(evt.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const json = XLSX.utils.sheet_to_json(sheet);
-            if (!json || json.length === 0) {
-              showToast('엑셀 파일에 데이터가 없습니다.', '⚠️');
-              return;
-            }
-
-            const statusArea = document.getElementById('addressBatchStatusArea');
-            const statusText = document.getElementById('addressBatchStatusText');
-            const progressBar = document.getElementById('addressBatchProgressBar');
-            const confirmBox = document.getElementById('addressBatchConfirmBox');
-            
-            statusArea.classList.remove('hidden');
-            confirmBox.classList.add('hidden');
-
-            const gridLineNamesMap = new Map();
-            let geocodedCount = 0;
-
-            const CHUNK_SIZE = 10;
-            for (let i = 0; i < json.length; i += CHUNK_SIZE) {
-              const chunk = json.slice(i, i + CHUNK_SIZE);
-              await Promise.all(chunk.map(async (row) => {
-                const address = String(row.주소 || row.address || row.A || row[Object.keys(row)[0]] || '').trim();
-                const lineName = String(row.배전선로이름 || row.lineName || row.B || row[Object.keys(row)[1]] || '').trim();
-                
-                if (!address || !lineName) return;
-
-                const point = await geocodeAddress(address);
-                if (point) {
-                  geocodedCount++;
-                  const south = Math.floor(point.lat / LAT_250M) * LAT_250M;
-                  const west = Math.floor(point.lng / LNG_250M) * LNG_250M;
-                  const gridId = `GRID-${Math.round(south * 1000)}_${Math.round(west * 1000)}`;
-
-                  if (!gridLineNamesMap.has(gridId)) {
-                    gridLineNamesMap.set(gridId, { south, west, north: south + LAT_250M, east: west + LNG_250M, lines: [] });
-                  }
-                  gridLineNamesMap.get(gridId).lines.push(lineName);
-                }
-              }));
-
-              const processedCount = Math.min(i + CHUNK_SIZE, json.length);
-              statusText.textContent = `고속 주소 분석 중 (${processedCount} / ${json.length}) - 성공: ${geocodedCount}건`;
-              progressBar.style.width = `${Math.round((processedCount / json.length) * 100)}%`;
-            }
-
-            statusText.textContent = `분석 완료! (총 ${geocodedCount}개 주소 매칭 성공, 총 ${gridLineNamesMap.size}개 격자 도출)`;
-            
-            pendingAddressBatchData = [];
-            gridLineNamesMap.forEach((val, gridId) => {
-              const counts = {};
-              let maxC = 0;
-              let majorityLine = val.lines[0];
-              val.lines.forEach(l => {
-                counts[l] = (counts[l] || 0) + 1;
-                if (counts[l] > maxC) {
-                  maxC = counts[l];
-                  majorityLine = l;
-                }
-              });
-              pendingAddressBatchData.push({
-                gridId,
-                south: val.south,
-                west: val.west,
-                north: val.north,
-                east: val.east,
-                lineName: majorityLine,
-                updatedAt: new Date().toISOString()
-              });
-            });
-
-            document.getElementById('addressBatchResultSummary').textContent = `총 ${geocodedCount}개 주소 분석 완료 → 총 ${pendingAddressBatchData.length}개 격자 배전선로 도출`;
-            confirmBox.classList.remove('hidden');
-          } catch (err) {
-            console.error(err);
-            showToast('주소 엑셀 처리 중 오류 발생', '❌');
+        try {
+          const json = await parseFileToJSON(file);
+          if (!json || json.length === 0) {
+            showToast('파일에 데이터가 없습니다.', '⚠️');
+            return;
           }
-        };
-        reader.readAsArrayBuffer(file);
+
+          const statusArea = document.getElementById('addressBatchStatusArea');
+          const statusText = document.getElementById('addressBatchStatusText');
+          const progressBar = document.getElementById('addressBatchProgressBar');
+          const confirmBox = document.getElementById('addressBatchConfirmBox');
+          
+          statusArea.classList.remove('hidden');
+          confirmBox.classList.add('hidden');
+
+          const gridLineNamesMap = new Map();
+          let geocodedCount = 0;
+
+          const CHUNK_SIZE = 10;
+          for (let i = 0; i < json.length; i += CHUNK_SIZE) {
+            const chunk = json.slice(i, i + CHUNK_SIZE);
+            await Promise.all(chunk.map(async (row) => {
+              const vals = Object.values(row);
+              const address = String(row.주소 || row.address || row.Address || row.ADDR || vals[0] || '').trim();
+              const lineName = String(row.배전선로이름 || row.배전선로명 || row.lineName || row.LineName || vals[1] || '미상선로').trim();
+              
+              if (!address) return;
+
+              const point = await geocodeAddress(address);
+              if (point) {
+                geocodedCount++;
+                const south = Math.floor(point.lat / LAT_250M) * LAT_250M;
+                const west = Math.floor(point.lng / LNG_250M) * LNG_250M;
+                const gridId = `GRID-${Math.round(south * 1000)}_${Math.round(west * 1000)}`;
+
+                if (!gridLineNamesMap.has(gridId)) {
+                  gridLineNamesMap.set(gridId, { south, west, north: south + LAT_250M, east: west + LNG_250M, lines: [] });
+                }
+                gridLineNamesMap.get(gridId).lines.push(lineName);
+              }
+            }));
+
+            const processedCount = Math.min(i + CHUNK_SIZE, json.length);
+            statusText.textContent = `고속 주소 분석 중 (${processedCount} / ${json.length}) - 성공: ${geocodedCount}건`;
+            progressBar.style.width = `${Math.round((processedCount / json.length) * 100)}%`;
+          }
+
+          statusText.textContent = `분석 완료! (총 ${geocodedCount}개 주소 매칭 성공, 총 ${gridLineNamesMap.size}개 격자 도출)`;
+          
+          pendingAddressBatchData = [];
+          gridLineNamesMap.forEach((val, gridId) => {
+            const counts = {};
+            let maxC = 0;
+            let majorityLine = val.lines[0];
+            val.lines.forEach(l => {
+              counts[l] = (counts[l] || 0) + 1;
+              if (counts[l] > maxC) {
+                maxC = counts[l];
+                majorityLine = l;
+              }
+            });
+            pendingAddressBatchData.push({
+              gridId,
+              south: val.south,
+              west: val.west,
+              north: val.north,
+              east: val.east,
+              lineName: majorityLine,
+              updatedAt: new Date().toISOString()
+            });
+          });
+
+          document.getElementById('addressBatchResultSummary').textContent = `총 ${geocodedCount}개 주소 분석 완료 → 총 ${pendingAddressBatchData.length}개 격자 배전선로 도출`;
+          confirmBox.classList.remove('hidden');
+        } catch (err) {
+          console.error(err);
+          showToast('파일 처리 중 오류 발생', '❌');
+        }
       });
 
       document.getElementById('cancelAddressBatchBtn').addEventListener('click', () => {
@@ -2372,66 +2402,60 @@
         });
       });
 
-      document.getElementById('importLineCapacitiesFileInput').addEventListener('change', (e) => {
+      document.getElementById('importLineCapacitiesFileInput').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-          try {
-            const data = new Uint8Array(evt.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const json = XLSX.utils.sheet_to_json(sheet);
-            if (!json || json.length === 0) {
-              showToast('엑셀 파일에 데이터가 없습니다.', '⚠️');
-              return;
-            }
-
-            let updatedLines = 0;
-            const gridsToUpdate = [];
-
-            json.forEach(row => {
-              const lineName = String(row.배전선로명 || row.lineName || row.LineName || '').trim();
-              const sub = row.변전소용량_kW !== undefined && row.변전소용량_kW !== '' ? parseFloat(row.변전소용량_kW) : null;
-              const mtr = row.MTR용량_kW !== undefined && row.MTR용량_kW !== '' ? parseFloat(row.MTR용량_kW) : null;
-              const lineCap = row.선로용량_kW !== undefined && row.선로용량_kW !== '' ? parseFloat(row.선로용량_kW) : null;
-
-              if (!lineName) return;
-
-              gridsData.forEach(grid => {
-                if (grid.lineName && grid.lineName.trim() === lineName) {
-                  if (sub !== null && !isNaN(sub)) grid.substationCap = sub;
-                  if (mtr !== null && !isNaN(mtr)) grid.mtrCap = mtr;
-                  if (lineCap !== null && !isNaN(lineCap)) grid.lineCap = lineCap;
-                  grid.updatedAt = new Date().toISOString();
-                  updatedLines++;
-                  gridsToUpdate.push(grid);
-                }
-              });
-            });
-
-            try {
-              const localGrids = {};
-              gridsData.forEach((val, key) => { localGrids[key] = val; });
-              localStorage.setItem('dg_grids_local_cache', JSON.stringify(localGrids));
-            } catch (e) {}
-
-            if (isFirebaseConnected && db) {
-              await commitBatchInChunks(gridsToUpdate, (batch, grid) => {
-                const ref = db.collection('grids').doc(grid.gridId);
-                batch.set(ref, grid, { merge: true });
-              });
-            }
-
-            generateViewportGrids();
-            document.getElementById('adminModal').classList.add('hidden');
-            showToast(`선로별 용량 엑셀 업로드 반영 완료 (업데이트된 선로 관련 격자)`, '✅');
-          } catch (err) {
-            console.error(err);
-            showToast('선로 용량 엑셀 처리 중 오류 발생', '❌');
+        try {
+          const json = await parseFileToJSON(file);
+          if (!json || json.length === 0) {
+            showToast('파일에 데이터가 없습니다.', '⚠️');
+            return;
           }
-        };
-        reader.readAsArrayBuffer(file);
+
+          let updatedLines = 0;
+          const gridsToUpdate = [];
+
+          json.forEach(row => {
+            const vals = Object.values(row);
+            const lineName = String(row.배전선로명 || row.배전선로이름 || row.lineName || row.LineName || vals[0] || '').trim();
+            const sub = row.변전소용량_kW !== undefined && row.변전소용량_kW !== '' ? parseFloat(row.변전소용량_kW) : (vals[1] !== undefined && vals[1] !== '' ? parseFloat(vals[1]) : null);
+            const mtr = row.MTR용량_kW !== undefined && row.MTR용량_kW !== '' ? parseFloat(row.MTR용량_kW) : (vals[2] !== undefined && vals[2] !== '' ? parseFloat(vals[2]) : null);
+            const lineCap = row.선로용량_kW !== undefined && row.선로용량_kW !== '' ? parseFloat(row.선로용량_kW) : (vals[3] !== undefined && vals[3] !== '' ? parseFloat(vals[3]) : null);
+
+            if (!lineName) return;
+
+            gridsData.forEach(grid => {
+              if (grid.lineName && grid.lineName.trim() === lineName) {
+                if (sub !== null && !isNaN(sub)) grid.substationCap = sub;
+                if (mtr !== null && !isNaN(mtr)) grid.mtrCap = mtr;
+                if (lineCap !== null && !isNaN(lineCap)) grid.lineCap = lineCap;
+                grid.updatedAt = new Date().toISOString();
+                updatedLines++;
+                gridsToUpdate.push(grid);
+              }
+            });
+          });
+
+          try {
+            const localGrids = {};
+            gridsData.forEach((val, key) => { localGrids[key] = val; });
+            localStorage.setItem('dg_grids_local_cache', JSON.stringify(localGrids));
+          } catch (e) {}
+
+          if (isFirebaseConnected && db) {
+            await commitBatchInChunks(gridsToUpdate, (batch, grid) => {
+              const ref = db.collection('grids').doc(grid.gridId);
+              batch.set(ref, grid, { merge: true });
+            });
+          }
+
+          generateViewportGrids();
+          document.getElementById('adminModal').classList.add('hidden');
+          showToast(`선로 용량 파일 업로드 반영 완료 (${updatedLines}개 격자 업데이트)`, '✅');
+        } catch (err) {
+          console.error(err);
+          showToast('파일 처리 중 오류 발생', '❌');
+        }
       });
     }
 
